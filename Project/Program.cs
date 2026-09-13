@@ -100,32 +100,11 @@ namespace UrnWrapper
 			TreeViewColumn actionColumn = BuildActionColumn();
 			table.AppendColumn(actionColumn);
 
-			table.ButtonPressEvent += (sender, args) =>
-			{
-				OnActionColumnPressed(table, actionColumn, args);
-			};
-
 			var scrolledWindow = new ScrolledWindow();
 			scrolledWindow.ShadowType = ShadowType.In;
 			scrolledWindow.Add(table);
 
 			return scrolledWindow;
-		}
-
-		private static void OnActionColumnPressed(TreeView table, TreeViewColumn actionColumn, ButtonPressEventArgs args)
-		{
-			if (args.Event.Button != 1)
-			{
-				return;
-			}
-
-			if (table.GetPathAtPos((int)args.Event.X, (int)args.Event.Y, out TreePath path, out TreeViewColumn column))
-			{
-				if (column == actionColumn)
-				{
-					Console.WriteLine("hello");
-				}
-			}
 		}
 
 		private static void ShowAddItemDialog(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items)
@@ -285,18 +264,31 @@ namespace UrnWrapper
 
 		private static TreeViewColumn BuildActionColumn()
 		{
-			var iconRenderer = new CellRendererPixbuf();
-			iconRenderer.IconName = "face-smile-symbolic";
+			var runIcon = new CellRendererPixbuf();
+			runIcon.IconName = "media-playback-start-symbolic";
+			var runText = new CellRendererText();
+			runText.Text = "Run";
 
-			var textRenderer = new CellRendererText();
-			textRenderer.Text = "Hello";
+			var editIcon = new CellRendererPixbuf();
+			editIcon.IconName = "document-edit-symbolic";
+			var editText = new CellRendererText();
+			editText.Text = "Edit";
+
+			var removeIcon = new CellRendererPixbuf();
+			removeIcon.IconName = "edit-delete-symbolic";
+			var removeText = new CellRendererText();
+			removeText.Text = "Remove";
 
 			var column = new TreeViewColumn();
 			column.Title = "Actions";
 			column.Sizing = TreeViewColumnSizing.Fixed;
-			column.FixedWidth = 90;
-			column.PackStart(iconRenderer, false);
-			column.PackStart(textRenderer, false);
+			column.FixedWidth = 210;
+			column.PackStart(runIcon, false);
+			column.PackStart(runText, false);
+			column.PackStart(editIcon, false);
+			column.PackStart(editText, false);
+			column.PackStart(removeIcon, false);
+			column.PackStart(removeText, false);
 
 			return column;
 		}
