@@ -51,8 +51,9 @@ namespace UrnWrapper
 			searchEntry.PlaceholderText = SearchPlaceholder;
 			searchEntry.PrimaryIconName = "edit-find-symbolic";
 
-			var store = new ListStore(typeof(string), typeof(string), typeof(int));
-			PopulateStore(store);
+			var store = new ListStore(typeof(string), typeof(string), typeof(string));
+			List<SandboxProfile> items = LoadItems();
+			PopulateStore(store, items);
 
 			var filter = new TreeModelFilter(store, null);
 			filter.VisibleFunc = (model, iter) => RowMatchesSearch(model, iter, searchEntry.Text);
@@ -65,7 +66,7 @@ namespace UrnWrapper
 			var addButton = new Button("Add");
 			addButton.Clicked += (sender, args) =>
 			{
-				ShowAddItemDialog(window, store, filter);
+				ShowAddItemDialog(window, store, filter, items);
 			};
 
 			var headerBar = new Box(Orientation.Horizontal, 6);
@@ -87,8 +88,7 @@ namespace UrnWrapper
 		{
 			var table = new TreeView(filter);
 			table.AppendColumn(BuildTextColumn("Name", 0));
-			table.AppendColumn(BuildTextColumn("Category", 1));
-			table.AppendColumn(BuildTextColumn("Quantity", 2));
+			table.AppendColumn(BuildTextColumn("Last executed", 1));
 
 			TreeViewColumn actionColumn = BuildActionColumn();
 			table.AppendColumn(actionColumn);
@@ -121,7 +121,7 @@ namespace UrnWrapper
 			}
 		}
 
-		private static void ShowAddItemDialog(Window parent, ListStore store, TreeModelFilter filter)
+		private static void ShowAddItemDialog(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items)
 		{
 			using (var dialog = new Dialog("Add Item", parent, DialogFlags.Modal))
 			{
@@ -129,17 +129,14 @@ namespace UrnWrapper
 				dialog.AddButton("Add", ResponseType.Accept);
 
 				var nameEntry = new Entry();
-				var categoryEntry = new Entry();
-				var quantitySpin = new SpinButton(0, 9999, 1);
-				quantitySpin.Value = 1;
+				var commandEntry = new Entry();
 
 				Box contentArea = dialog.ContentArea;
 				contentArea.Spacing = 6;
 				contentArea.Margin = 6;
 
 				contentArea.PackStart(BuildLabeledRow("Name:", nameEntry), false, false, 0);
-				contentArea.PackStart(BuildLabeledRow("Category:", categoryEntry), false, false, 0);
-				contentArea.PackStart(BuildLabeledRow("Quantity:", quantitySpin), false, false, 0);
+				contentArea.PackStart(BuildLabeledRow("Command:", commandEntry), false, false, 0);
 
 				dialog.ShowAll();
 
@@ -147,7 +144,10 @@ namespace UrnWrapper
 
 				if (response == ResponseType.Accept && !string.IsNullOrWhiteSpace(nameEntry.Text))
 				{
-					store.AppendValues(nameEntry.Text.Trim(), categoryEntry.Text.Trim(), quantitySpin.ValueAsInt);
+					var profile = new SandboxProfile(nameEntry.Text.Trim(), commandEntry.Text.Trim(), null);
+					items.Add(profile);
+					SaveItems(GetItemsFilePath(), items);
+					store.AppendValues(profile.Name, FormatLastExecuted(profile.LastExecuted), profile.Command);
 					filter.Refilter();
 				}
 			}
@@ -166,47 +166,50 @@ namespace UrnWrapper
 			return row;
 		}
 
-		private static void PopulateStore(ListStore store)
+		private static void PopulateStore(ListStore store, List<SandboxProfile> items)
 		{
-			foreach (SampleItem item in LoadItems())
+			foreach (SandboxProfile profile in items)
 			{
-				store.AppendValues(item.Name, item.Category, item.Quantity);
+				store.AppendValues(profile.Name, FormatLastExecuted(profile.LastExecuted), profile.Command);
 			}
 		}
 
-		private static IReadOnlyList<SampleItem> LoadItems()
+		private static List<SandboxProfile> LoadItems()
 		{
-			string filePath = Path.Combine(AppContext.BaseDirectory, ItemsFileName);
+			string filePath = GetItemsFilePath();
 
 			if (!File.Exists(filePath))
 			{
-				IReadOnlyList<SampleItem> defaults = GetSampleItems();
-				SaveItems(filePath, defaults);
-				return defaults;
+				var empty = new List<SandboxProfile>();
+				SaveItems(filePath, empty);
+				return empty;
 			}
 
 			string json = File.ReadAllText(filePath);
-			List<SampleItem>? items = JsonSerializer.Deserialize<List<SampleItem>>(json, JsonOptions);
+			List<SandboxProfile>? items = JsonSerializer.Deserialize<List<SandboxProfile>>(json, JsonOptions);
 
-			return items ?? new List<SampleItem>();
+			return items ?? new List<SandboxProfile>();
 		}
 
-		private static void SaveItems(string filePath, IReadOnlyList<SampleItem> items)
+		private static string GetItemsFilePath()
+		{
+			return Path.Combine(AppContext.BaseDirectory, ItemsFileName);
+		}
+
+		private static void SaveItems(string filePath, IReadOnlyList<SandboxProfile> items)
 		{
 			string json = JsonSerializer.Serialize(items, JsonOptions);
 			File.WriteAllText(filePath, json);
 		}
 
-		private static IReadOnlyList<SampleItem> GetSampleItems()
+		private static string FormatLastExecuted(DateTime? lastExecuted)
 		{
-			return new[]
+			if (!lastExecuted.HasValue)
 			{
-				new SampleItem("Apple", "Fruit", 12),
-				new SampleItem("Banana", "Fruit", 8),
-				new SampleItem("Carrot", "Vegetable", 5),
-				new SampleItem("Bread", "Bakery", 3),
-				new SampleItem("Milk", "Dairy", 2),
-			};
+				return "Never";
+			}
+
+			return lastExecuted.Value.ToString("yyyy-MM-dd HH:mm");
 		}
 
 		private static bool RowMatchesSearch(ITreeModel model, TreeIter iter, string searchText)
@@ -218,16 +221,19 @@ namespace UrnWrapper
 
 			string normalizedSearch = searchText.Trim();
 			string name = (string)model.GetValue(iter, 0);
-			string category = (string)model.GetValue(iter, 1);
-			int quantity = (int)model.GetValue(iter, 2);
+			string command = (string)model.GetValue(iter, 2);
 
 			return ContainsIgnoreCase(name, normalizedSearch)
-				|| ContainsIgnoreCase(category, normalizedSearch)
-				|| ContainsIgnoreCase(quantity.ToString(), normalizedSearch);
+				|| ContainsIgnoreCase(command, normalizedSearch);
 		}
 
 		private static bool ContainsIgnoreCase(string source, string searchText)
 		{
+			if (string.IsNullOrEmpty(source))
+			{
+				return false;
+			}
+
 			return source.IndexOf(searchText, StringComparison.OrdinalIgnoreCase) >= 0;
 		}
 
@@ -251,7 +257,7 @@ namespace UrnWrapper
 			textRenderer.Text = "Hello";
 
 			var column = new TreeViewColumn();
-			column.Title = "Action";
+			column.Title = "Actions";
 			column.Sizing = TreeViewColumnSizing.Fixed;
 			column.FixedWidth = 90;
 			column.PackStart(iconRenderer, false);
@@ -266,20 +272,20 @@ namespace UrnWrapper
 			args.RetVal = true;
 		}
 
-		private sealed class SampleItem
+		private sealed class SandboxProfile
 		{
-			public SampleItem(string name, string category, int quantity)
+			public SandboxProfile(string name, string command, DateTime? lastExecuted)
 			{
 				Name = name;
-				Category = category;
-				Quantity = quantity;
+				Command = command;
+				LastExecuted = lastExecuted;
 			}
 
 			public string Name { get; }
 
-			public string Category { get; }
+			public string Command { get; }
 
-			public int Quantity { get; }
+			public DateTime? LastExecuted { get; }
 		}
 	}
 }
