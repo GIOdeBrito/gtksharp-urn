@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Gtk;
 
 namespace UrnWrapper
@@ -10,6 +11,7 @@ namespace UrnWrapper
 	{
 		private const string SearchPlaceholder = "Search...";
 		private const string ItemsFileName = "items.json";
+		private const string ConfigFileName = "config.json";
 
 		private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
 		{
@@ -17,10 +19,14 @@ namespace UrnWrapper
 			WriteIndented = true,
 		};
 
+		private static Config AppConfig = new Config("");
+
 		[STAThread]
 		private static void Main()
 		{
 			Application.Init();
+
+			AppConfig = LoadConfig();
 
 			Window mainWindow = BuildMainWindow();
 			mainWindow.ShowAll();
@@ -196,6 +202,34 @@ namespace UrnWrapper
 			return Path.Combine(AppContext.BaseDirectory, ItemsFileName);
 		}
 
+		private static Config LoadConfig()
+		{
+			string filePath = GetConfigFilePath();
+
+			if (!File.Exists(filePath))
+			{
+				var defaults = new Config("");
+				SaveConfig(filePath, defaults);
+				return defaults;
+			}
+
+			string json = File.ReadAllText(filePath);
+			Config? config = JsonSerializer.Deserialize<Config>(json, JsonOptions);
+
+			return config ?? new Config("");
+		}
+
+		private static void SaveConfig(string filePath, Config config)
+		{
+			string json = JsonSerializer.Serialize(config, JsonOptions);
+			File.WriteAllText(filePath, json);
+		}
+
+		private static string GetConfigFilePath()
+		{
+			return Path.Combine(AppContext.BaseDirectory, ConfigFileName);
+		}
+
 		private static void SaveItems(string filePath, IReadOnlyList<SandboxProfile> items)
 		{
 			string json = JsonSerializer.Serialize(items, JsonOptions);
@@ -286,6 +320,17 @@ namespace UrnWrapper
 			public string Command { get; }
 
 			public DateTime? LastExecuted { get; }
+		}
+
+		private sealed class Config
+		{
+			public Config(string defaultHome)
+			{
+				DefaultHome = defaultHome;
+			}
+
+			[JsonPropertyName("defaultHome")]
+			public string DefaultHome { get; }
 		}
 	}
 }
