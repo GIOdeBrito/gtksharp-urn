@@ -1,0 +1,6 @@
+services:
+    dotnet-project-urn:
+        build: .
+        volumes:
+            - ./Project:/src
+        tty: true
