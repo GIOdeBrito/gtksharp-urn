@@ -41,19 +41,6 @@ namespace UrnWrapper
 			searchEntry.PlaceholderText = SearchPlaceholder;
 			searchEntry.PrimaryIconName = "edit-find-symbolic";
 
-			ScrolledWindow tableContainer = BuildTableContainer(searchEntry);
-
-			layout.PackStart(searchEntry, false, false, 0);
-			layout.PackStart(tableContainer, true, true, 0);
-
-			window.Add(layout);
-			window.DeleteEvent += OnWindowDelete;
-
-			return window;
-		}
-
-		private static ScrolledWindow BuildTableContainer(SearchEntry searchEntry)
-		{
 			var store = new ListStore(typeof(string), typeof(string), typeof(int));
 			PopulateStore(store);
 
@@ -65,6 +52,29 @@ namespace UrnWrapper
 				filter.Refilter();
 			};
 
+			var addButton = new Button("Add");
+			addButton.Clicked += (sender, args) =>
+			{
+				ShowAddItemDialog(window, store, filter);
+			};
+
+			var headerBar = new Box(Orientation.Horizontal, 6);
+			headerBar.PackStart(searchEntry, true, true, 0);
+			headerBar.PackStart(addButton, false, false, 0);
+
+			ScrolledWindow tableContainer = BuildTableContainer(filter);
+
+			layout.PackStart(headerBar, false, false, 0);
+			layout.PackStart(tableContainer, true, true, 0);
+
+			window.Add(layout);
+			window.DeleteEvent += OnWindowDelete;
+
+			return window;
+		}
+
+		private static ScrolledWindow BuildTableContainer(TreeModelFilter filter)
+		{
 			var table = new TreeView(filter);
 			table.AppendColumn(BuildTextColumn("Name", 0));
 			table.AppendColumn(BuildTextColumn("Category", 1));
@@ -75,6 +85,51 @@ namespace UrnWrapper
 			scrolledWindow.Add(table);
 
 			return scrolledWindow;
+		}
+
+		private static void ShowAddItemDialog(Window parent, ListStore store, TreeModelFilter filter)
+		{
+			using (var dialog = new Dialog("Add Item", parent, DialogFlags.Modal))
+			{
+				dialog.AddButton("Cancel", ResponseType.Cancel);
+				dialog.AddButton("Add", ResponseType.Accept);
+
+				var nameEntry = new Entry();
+				var categoryEntry = new Entry();
+				var quantitySpin = new SpinButton(0, 9999, 1);
+				quantitySpin.Value = 1;
+
+				Box contentArea = dialog.ContentArea;
+				contentArea.Spacing = 6;
+				contentArea.Margin = 6;
+
+				contentArea.PackStart(BuildLabeledRow("Name:", nameEntry), false, false, 0);
+				contentArea.PackStart(BuildLabeledRow("Category:", categoryEntry), false, false, 0);
+				contentArea.PackStart(BuildLabeledRow("Quantity:", quantitySpin), false, false, 0);
+
+				dialog.ShowAll();
+
+				ResponseType response = (ResponseType)dialog.Run();
+
+				if (response == ResponseType.Accept && !string.IsNullOrWhiteSpace(nameEntry.Text))
+				{
+					store.AppendValues(nameEntry.Text.Trim(), categoryEntry.Text.Trim(), quantitySpin.ValueAsInt);
+					filter.Refilter();
+				}
+			}
+		}
+
+		private static Box BuildLabeledRow(string labelText, Widget inputWidget)
+		{
+			var label = new Label(labelText);
+			label.Xalign = 1;
+			label.WidthRequest = 80;
+
+			var row = new Box(Orientation.Horizontal, 6);
+			row.PackStart(label, false, false, 0);
+			row.PackStart(inputWidget, true, true, 0);
+
+			return row;
 		}
 
 		private static void PopulateStore(ListStore store)
