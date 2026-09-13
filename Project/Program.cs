@@ -12,6 +12,7 @@ namespace UrnWrapper
 		private const string SearchPlaceholder = "Search...";
 		private const string ItemsFileName = "items.json";
 		private const string ConfigFileName = "config.json";
+		private const string DefaultCommandTemplate = "bwrap --ro-bind / / --dev /dev --proc /proc --bind %defaultHomeDir% $HOME %programPath%";
 
 		private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
 		{
@@ -19,7 +20,7 @@ namespace UrnWrapper
 			WriteIndented = true,
 		};
 
-		private static Config AppConfig = new Config("");
+		private static Config AppConfig = new Config("", DefaultCommandTemplate);
 
 		[STAThread]
 		private static void Main()
@@ -208,7 +209,7 @@ namespace UrnWrapper
 
 			if (!File.Exists(filePath))
 			{
-				var defaults = new Config("");
+				var defaults = new Config("", DefaultCommandTemplate);
 				SaveConfig(filePath, defaults);
 				return defaults;
 			}
@@ -216,7 +217,7 @@ namespace UrnWrapper
 			string json = File.ReadAllText(filePath);
 			Config? config = JsonSerializer.Deserialize<Config>(json, JsonOptions);
 
-			return config ?? new Config("");
+			return config ?? new Config("", DefaultCommandTemplate);
 		}
 
 		private static void SaveConfig(string filePath, Config config)
@@ -324,13 +325,17 @@ namespace UrnWrapper
 
 		private sealed class Config
 		{
-			public Config(string defaultHome)
+			public Config(string defaultHome, string defaultCommand)
 			{
 				DefaultHome = defaultHome;
+				DefaultCommand = defaultCommand;
 			}
 
 			[JsonPropertyName("defaultHome")]
 			public string DefaultHome { get; }
+
+			[JsonPropertyName("defaultCommand")]
+			public string DefaultCommand { get; }
 		}
 	}
 }
