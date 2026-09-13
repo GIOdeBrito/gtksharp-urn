@@ -33,6 +33,7 @@ namespace UrnWrapper
 		{
 			var window = new Window("UrnWrapper");
 			window.SetSizeRequest(600, 400);
+			window.SetPosition(WindowPosition.Center);
 
 			var layout = new Box(Orientation.Vertical, 6);
 			layout.Margin = 6;
