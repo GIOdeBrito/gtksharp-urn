@@ -80,11 +80,35 @@ namespace UrnWrapper
 			table.AppendColumn(BuildTextColumn("Category", 1));
 			table.AppendColumn(BuildTextColumn("Quantity", 2));
 
+			TreeViewColumn actionColumn = BuildActionColumn();
+			table.AppendColumn(actionColumn);
+
+			table.ButtonPressEvent += (sender, args) =>
+			{
+				OnActionColumnPressed(table, actionColumn, args);
+			};
+
 			var scrolledWindow = new ScrolledWindow();
 			scrolledWindow.ShadowType = ShadowType.In;
 			scrolledWindow.Add(table);
 
 			return scrolledWindow;
+		}
+
+		private static void OnActionColumnPressed(TreeView table, TreeViewColumn actionColumn, ButtonPressEventArgs args)
+		{
+			if (args.Event.Button != 1)
+			{
+				return;
+			}
+
+			if (table.GetPathAtPos((int)args.Event.X, (int)args.Event.Y, out TreePath path, out TreeViewColumn column))
+			{
+				if (column == actionColumn)
+				{
+					Console.WriteLine("hello");
+				}
+			}
 		}
 
 		private static void ShowAddItemDialog(Window parent, ListStore store, TreeModelFilter filter)
@@ -181,6 +205,24 @@ namespace UrnWrapper
 			column.Title = title;
 			column.PackStart(cellRenderer, true);
 			column.AddAttribute(cellRenderer, "text", columnIndex);
+
+			return column;
+		}
+
+		private static TreeViewColumn BuildActionColumn()
+		{
+			var iconRenderer = new CellRendererPixbuf();
+			iconRenderer.IconName = "face-smile-symbolic";
+
+			var textRenderer = new CellRendererText();
+			textRenderer.Text = "Hello";
+
+			var column = new TreeViewColumn();
+			column.Title = "Action";
+			column.Sizing = TreeViewColumnSizing.Fixed;
+			column.FixedWidth = 90;
+			column.PackStart(iconRenderer, false);
+			column.PackStart(textRenderer, false);
 
 			return column;
 		}
