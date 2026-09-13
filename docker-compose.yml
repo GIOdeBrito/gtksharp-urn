@@ -1,6 +1,7 @@
 services:
-    dotnet-project-urn:
+    project-builder:
         build: .
         volumes:
             - ./Project:/src
+            - ./entrypoint.sh:/entrypoint.sh:ro
         tty: true
