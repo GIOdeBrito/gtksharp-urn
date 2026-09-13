@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
 using Gtk;
 
 namespace UrnWrapper
@@ -7,6 +9,13 @@ namespace UrnWrapper
 	internal static class Program
 	{
 		private const string SearchPlaceholder = "Search...";
+		private const string ItemsFileName = "items.json";
+
+		private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
+		{
+			PropertyNameCaseInsensitive = true,
+			WriteIndented = true,
+		};
 
 		[STAThread]
 		private static void Main()
@@ -159,10 +168,33 @@ namespace UrnWrapper
 
 		private static void PopulateStore(ListStore store)
 		{
-			foreach (SampleItem item in GetSampleItems())
+			foreach (SampleItem item in LoadItems())
 			{
 				store.AppendValues(item.Name, item.Category, item.Quantity);
 			}
+		}
+
+		private static IReadOnlyList<SampleItem> LoadItems()
+		{
+			string filePath = Path.Combine(AppContext.BaseDirectory, ItemsFileName);
+
+			if (!File.Exists(filePath))
+			{
+				IReadOnlyList<SampleItem> defaults = GetSampleItems();
+				SaveItems(filePath, defaults);
+				return defaults;
+			}
+
+			string json = File.ReadAllText(filePath);
+			List<SampleItem>? items = JsonSerializer.Deserialize<List<SampleItem>>(json, JsonOptions);
+
+			return items ?? new List<SampleItem>();
+		}
+
+		private static void SaveItems(string filePath, IReadOnlyList<SampleItem> items)
+		{
+			string json = JsonSerializer.Serialize(items, JsonOptions);
+			File.WriteAllText(filePath, json);
 		}
 
 		private static IReadOnlyList<SampleItem> GetSampleItems()
