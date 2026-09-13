@@ -6,8 +6,8 @@
     <LangVersion>8.0</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
-    <AssemblyName>GtkSharpDemo</AssemblyName>
-    <RootNamespace>GtkSharpDemo</RootNamespace>
+    <AssemblyName>UrnWrapper</AssemblyName>
+    <RootNamespace>UrnWrapper</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

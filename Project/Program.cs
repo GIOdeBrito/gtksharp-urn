@@ -1,7 +1,7 @@
 ﻿using System;
 using Gtk;
 
-namespace GtkSharpDemo
+namespace UrnWrapper
 {
 	internal static class Program
 	{
@@ -28,7 +28,7 @@ namespace GtkSharpDemo
 
 		private static Window BuildMainWindow()
 		{
-			var window = new Window("GtkSharp Demo");
+			var window = new Window("UrnWrapper");
 			window.SetSizeRequest(400, 200);
 
 			var greetingLabel = new Label("Hello from GtkSharp!");
