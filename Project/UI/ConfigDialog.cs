@@ -15,6 +15,7 @@ namespace UrnWrapper.UI
 			using (var dialog = new Dialog("Config", parent, DialogFlags.Modal))
 			{
 				dialog.AddButton("Cancel", ResponseType.Cancel);
+				dialog.AddButton("Reset secure defaults", ResponseType.Reject);
 				dialog.AddButton("Save", ResponseType.Accept);
 
 				var homeEntry = new Entry();
@@ -37,6 +38,12 @@ namespace UrnWrapper.UI
 				ResponseType response = (ResponseType)dialog.Run();
 				string newHome = homeEntry.Text.Trim();
 
+				if (response == ResponseType.Reject)
+				{
+					ResetToSecureDefaults(parent, newHome);
+					return;
+				}
+
 				if (response != ResponseType.Accept)
 				{
 					return;
@@ -51,6 +58,12 @@ namespace UrnWrapper.UI
 				if (!Directory.Exists(newHome))
 				{
 					ShowError(parent, "Selected folder does not exist.");
+					return;
+				}
+
+				if (AppStorage.IsRealHomePath(newHome))
+				{
+					ShowError(parent, "Default home must never be the real home. Pick an isolated folder.");
 					return;
 				}
 
@@ -80,6 +93,35 @@ namespace UrnWrapper.UI
 			row.PackStart(browseButton, false, false, 0);
 
 			return row;
+		}
+
+		private static void ResetToSecureDefaults(Window parent, string newHome)
+		{
+			if (string.IsNullOrWhiteSpace(newHome))
+			{
+				ShowError(parent, "Default home must not be empty.");
+				return;
+			}
+
+			if (!Directory.Exists(newHome))
+			{
+				ShowError(parent, "Selected folder does not exist.");
+				return;
+			}
+
+			if (AppStorage.IsRealHomePath(newHome))
+			{
+				ShowError(parent, "Default home must never be the real home. Pick an isolated folder.");
+				return;
+			}
+
+			var reset = new Config(newHome, AppStorage.DefaultCommandTemplate);
+
+			if (!AppStorage.TrySaveConfig(AppStorage.GetConfigFilePath(), reset))
+			{
+				ShowError(parent, "Could not save config.json.");
+				return;
+			}
 		}
 
 		private static void BrowseForFolder(Dialog parent, Entry homeEntry)

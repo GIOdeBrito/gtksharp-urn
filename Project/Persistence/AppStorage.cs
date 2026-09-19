@@ -10,7 +10,23 @@ namespace UrnWrapper.Persistence
 	{
 		private const string ItemsFileName = "items.json";
 		private const string ConfigFileName = "config.json";
-		private const string DefaultCommandTemplate = "bwrap --ro-bind / / --dev /dev --proc /proc --bind %defaultHomeDir% $HOME %programPath%";
+		private const string UnsafeLegacyMarker = "--ro-bind / /";
+		private const string LegacySysfsMarker = "--sysfs";
+
+		internal const string SandboxHome = "/home/sandbox";
+
+		internal const string DefaultCommandTemplate = "bwrap --unshare-all --share-net --die-with-parent --new-session"
+			+ " --ro-bind /usr /usr --ro-bind /etc /etc --ro-bind /opt /opt"
+			+ " --symlink usr/lib /lib --symlink usr/lib64 /lib64 --symlink usr/bin /bin --symlink usr/sbin /sbin"
+			+ " --proc /proc --dev /dev --ro-bind-try /sys /sys --tmpfs /tmp --tmpfs /run"
+			+ " --dev-bind-try /dev/dri /dev/dri --dev-bind-try /dev/fuse /dev/fuse"
+			+ " --ro-bind-try /etc/fonts /etc/fonts --ro-bind-try /usr/share/fonts /usr/share/fonts --ro-bind-try /etc/ssl /etc/ssl"
+			+ " --bind-try /tmp/.X11-unix /tmp/.X11-unix --bind-try %xdgRuntimeDir% %xdgRuntimeDir%"
+			+ " --dir %sandboxHome% --bind %defaultHomeDir% %sandboxHome%"
+			+ " --setenv HOME %sandboxHome% --setenv XDG_CONFIG_HOME %sandboxConfig% --setenv XDG_CACHE_HOME %sandboxCache% --setenv XDG_DATA_HOME %sandboxData% --setenv XDG_RUNTIME_DIR /run"
+			+ " --setenv DISPLAY %display% --setenv WAYLAND_DISPLAY %waylandDisplay%"
+			+ " --chdir %sandboxHome%"
+			+ " --ro-bind-try %programDir% %programDir% -- %programPath%";
 
 		internal static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
 		{
@@ -66,13 +82,117 @@ namespace UrnWrapper.Persistence
 			{
 				string json = File.ReadAllText(filePath);
 				Config? config = JsonSerializer.Deserialize<Config>(json, JsonOptions);
-				return config ?? new Config("", DefaultCommandTemplate);
+
+				if (config == null)
+				{
+					return MigrateToSecureDefaults(filePath, "");
+				}
+
+				if (config.DefaultHome == null || config.DefaultCommand == null)
+				{
+					return MigrateToSecureDefaults(filePath, config.DefaultHome ?? "");
+				}
+
+				if (IsUnsafeTemplate(config.DefaultCommand))
+				{
+					return MigrateToSecureDefaults(filePath, config.DefaultHome);
+				}
+
+				return config;
 			}
 			catch (Exception exception) when (exception is JsonException || exception is IOException || exception is UnauthorizedAccessException)
 			{
 				BackupCorruptFile(filePath);
 				return new Config("", DefaultCommandTemplate);
 			}
+		}
+
+		internal static bool IsRealHomePath(string? candidate)
+		{
+			if (string.IsNullOrWhiteSpace(candidate))
+			{
+				return false;
+			}
+
+			string? realHome = Environment.GetEnvironmentVariable("HOME");
+
+			if (string.IsNullOrWhiteSpace(realHome))
+			{
+				return false;
+			}
+
+			string normalizedCandidate = Path.GetFullPath(candidate.Trim()).TrimEnd(Path.DirectorySeparatorChar);
+			string normalizedReal = Path.GetFullPath(realHome.Trim()).TrimEnd(Path.DirectorySeparatorChar);
+
+			if (string.IsNullOrEmpty(normalizedCandidate))
+			{
+				return true;
+			}
+
+			if (string.Equals(normalizedCandidate, normalizedReal, StringComparison.OrdinalIgnoreCase))
+			{
+				return true;
+			}
+
+			if (normalizedCandidate.StartsWith(normalizedReal + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+			{
+				return true;
+			}
+
+			// A parent of the real home (e.g. /home) would expose it when bound.
+			if (normalizedReal.StartsWith(normalizedCandidate + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+			{
+				return true;
+			}
+
+			return false;
+		}
+
+		internal static bool TemplateExposesRealHome(string? template)
+		{
+			if (string.IsNullOrWhiteSpace(template))
+			{
+				return false;
+			}
+
+			string? realHome = Environment.GetEnvironmentVariable("HOME");
+
+			if (string.IsNullOrWhiteSpace(realHome))
+			{
+				return false;
+			}
+
+			return template.Contains(realHome.Trim(), StringComparison.Ordinal);
+		}
+
+		private static Config MigrateToSecureDefaults(string filePath, string defaultHome)
+		{
+			// Old installs persist the legacy --ro-bind / / template or the
+			// invalid --sysfs flag, which no bwrap release supports.
+			// Replace it so old configs keep working and the real home stays hidden.
+			var migrated = new Config(defaultHome, DefaultCommandTemplate);
+			TrySaveConfig(filePath, migrated);
+			return migrated;
+		}
+
+		private static bool IsUnsafeTemplate(string template)
+		{
+			if (template.Contains(UnsafeLegacyMarker, StringComparison.Ordinal))
+			{
+				return true;
+			}
+
+			if (template.Contains(LegacySysfsMarker, StringComparison.Ordinal))
+			{
+				return true;
+			}
+
+			if (TemplateExposesRealHome(template))
+			{
+				return true;
+			}
+
+			return false;
 		}
 
 		internal static bool TrySaveItems(string filePath, IReadOnlyList<SandboxProfile> items)
