@@ -45,12 +45,6 @@ namespace UrnWrapper.UI
 
 			TreeView table = BuildProfileTable(window, store, filter, items);
 
-			var editButton = new Button("Edit");
-			editButton.Clicked += (sender, args) =>
-			{
-				EditSelectedEntry(window, table, store, filter, items);
-			};
-
 			var configButton = new Button("Config");
 			configButton.Clicked += (sender, args) =>
 			{
@@ -60,7 +54,6 @@ namespace UrnWrapper.UI
 			var headerBar = new Box(Orientation.Horizontal, 6);
 			headerBar.PackStart(searchEntry, true, true, 0);
 			headerBar.PackStart(addButton, false, false, 0);
-			headerBar.PackStart(editButton, false, false, 0);
 			headerBar.PackStart(configButton, false, false, 0);
 
 			ScrolledWindow tableContainer = WrapInScrolledWindow(table);
@@ -95,12 +88,19 @@ namespace UrnWrapper.UI
 			table.AppendColumn(BuildTextColumn("Name", StoreColumns.Name));
 			table.AppendColumn(BuildTextColumn("Last executed", StoreColumns.LastExecuted));
 
-			TreeViewColumn actionColumn = BuildActionColumn();
-			table.AppendColumn(actionColumn);
+			TreeViewColumn editColumn = BuildActionColumn("Edit", "document-edit-symbolic");
+			table.AppendColumn(BuildActionColumn("Run", "media-playback-start-symbolic"));
+			table.AppendColumn(editColumn);
+			table.AppendColumn(BuildActionColumn("Remove", "edit-delete-symbolic"));
 
 			table.RowActivated += (sender, args) =>
 			{
 				EditActivatedRow(parent, store, filter, items, args.Path);
+			};
+
+			table.ButtonPressEvent += (sender, args) =>
+			{
+				EditColumnIfClicked(parent, table, store, filter, items, editColumn, args);
 			};
 
 			return table;
@@ -115,22 +115,39 @@ namespace UrnWrapper.UI
 			return scrolledWindow;
 		}
 
-		private static void EditSelectedEntry(Window parent, TreeView table, ListStore store, TreeModelFilter filter, List<SandboxProfile> items)
+		private static void EditColumnIfClicked(Window parent, TreeView table, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreeViewColumn editColumn, ButtonPressEventArgs args)
 		{
-			if (!table.Selection.GetSelected(out ITreeModel selectedModel, out TreeIter selectedIter))
-			{
-				ShowSelectItemHint(parent);
-				return;
-			}
-
-			var selectedFilter = selectedModel as TreeModelFilter;
-			if (selectedFilter == null)
+			if (args.Event == null)
 			{
 				return;
 			}
 
-			TreeIter storeIter = selectedFilter.ConvertIterToChildIter(selectedIter);
-			EditStoreRow(parent, store, filter, items, storeIter);
+			if (args.Event.Button != 1)
+			{
+				return;
+			}
+
+			TreePath? clickedPath;
+			TreeViewColumn? clickedColumn;
+			int cellX;
+			int cellY;
+
+			if (!table.GetPathAtPos((int)args.Event.X, (int)args.Event.Y, out clickedPath, out clickedColumn, out cellX, out cellY))
+			{
+				return;
+			}
+
+			if (clickedPath == null)
+			{
+				return;
+			}
+
+			if (clickedColumn != editColumn)
+			{
+				return;
+			}
+
+			EditActivatedRow(parent, store, filter, items, clickedPath);
 		}
 
 		private static void EditActivatedRow(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreePath path)
@@ -179,14 +196,6 @@ namespace UrnWrapper.UI
 			return -1;
 		}
 
-		private static void ShowSelectItemHint(Window parent)
-		{
-			using (var hint = new MessageDialog(parent, DialogFlags.Modal, MessageType.Info, ButtonsType.Ok, "Select an item to edit."))
-			{
-				hint.Run();
-			}
-		}
-
 		private static TreeViewColumn BuildTextColumn(string title, int columnIndex)
 		{
 			var cellRenderer = new CellRendererText();
@@ -198,35 +207,19 @@ namespace UrnWrapper.UI
 			return column;
 		}
 
-		private static TreeViewColumn BuildActionColumn()
+		private static TreeViewColumn BuildActionColumn(string title, string iconName)
 		{
-			// Run/Remove cells are visual only in this scope. Edit runs
-			// through the header Edit button and row double-click.
-			var runIcon = new CellRendererPixbuf();
-			runIcon.IconName = "media-playback-start-symbolic";
-			var runText = new CellRendererText();
-			runText.Text = "Run";
-
-			var editIcon = new CellRendererPixbuf();
-			editIcon.IconName = "document-edit-symbolic";
-			var editText = new CellRendererText();
-			editText.Text = "Edit";
-
-			var removeIcon = new CellRendererPixbuf();
-			removeIcon.IconName = "edit-delete-symbolic";
-			var removeText = new CellRendererText();
-			removeText.Text = "Remove";
+			// Run/Remove cells are visual only in this scope. A left-click
+			// on the Edit column opens the edit dialog for that row.
+			var icon = new CellRendererPixbuf();
+			icon.IconName = iconName;
+			var text = new CellRendererText();
+			text.Text = title;
 
 			var column = new TreeViewColumn();
-			column.Title = "Actions";
-			column.Sizing = TreeViewColumnSizing.Fixed;
-			column.FixedWidth = 210;
-			column.PackStart(runIcon, false);
-			column.PackStart(runText, false);
-			column.PackStart(editIcon, false);
-			column.PackStart(editText, false);
-			column.PackStart(removeIcon, false);
-			column.PackStart(removeText, false);
+			column.Title = title;
+			column.PackStart(icon, false);
+			column.PackStart(text, false);
 
 			return column;
 		}
