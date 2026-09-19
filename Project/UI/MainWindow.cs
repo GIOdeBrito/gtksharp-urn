@@ -89,15 +89,16 @@ namespace UrnWrapper.UI
 			table.AppendColumn(BuildTextColumn("Name", StoreColumns.Name));
 			table.AppendColumn(BuildTextColumn("Last executed", StoreColumns.LastExecuted));
 
+			TreeViewColumn runColumn = BuildActionColumn("Run", "media-playback-start-symbolic");
 			TreeViewColumn editColumn = BuildActionColumn("Edit", "document-edit-symbolic");
 			TreeViewColumn removeColumn = BuildActionColumn("Remove", "edit-delete-symbolic");
-			table.AppendColumn(BuildActionColumn("Run", "media-playback-start-symbolic"));
+			table.AppendColumn(runColumn);
 			table.AppendColumn(editColumn);
 			table.AppendColumn(removeColumn);
 
 			table.ButtonPressEvent += (sender, args) =>
 			{
-				DispatchActionClick(parent, table, store, filter, items, editColumn, removeColumn, args);
+				DispatchActionClick(parent, table, store, filter, items, runColumn, editColumn, removeColumn, args);
 			};
 
 			return table;
@@ -112,7 +113,7 @@ namespace UrnWrapper.UI
 			return scrolledWindow;
 		}
 
-		private static void DispatchActionClick(Window parent, TreeView table, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreeViewColumn editColumn, TreeViewColumn removeColumn, ButtonPressEventArgs args)
+		private static void DispatchActionClick(Window parent, TreeView table, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreeViewColumn runColumn, TreeViewColumn editColumn, TreeViewColumn removeColumn, ButtonPressEventArgs args)
 		{
 			if (args.Event == null)
 			{
@@ -136,6 +137,12 @@ namespace UrnWrapper.UI
 
 			if (!TryGetStoreIter(filter, clickedPath, out TreeIter storeIter))
 			{
+				return;
+			}
+
+			if (clickedColumn == runColumn)
+			{
+				RunStoreRow(parent, store, filter, items, storeIter);
 				return;
 			}
 
@@ -168,6 +175,21 @@ namespace UrnWrapper.UI
 
 			storeIter = filter.ConvertIterToChildIter(filterIter);
 			return true;
+		}
+
+		private static void RunStoreRow(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreeIter storeIter)
+		{
+			if (isDialogOpen)
+			{
+				return;
+			}
+
+			if (!TryResolveRow(store, items, storeIter, out int itemIndex))
+			{
+				return;
+			}
+
+			RunProfile.Run(parent, store, filter, items, itemIndex);
 		}
 
 		private static void EditStoreRow(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreeIter storeIter)
@@ -264,9 +286,9 @@ namespace UrnWrapper.UI
 
 		private static TreeViewColumn BuildActionColumn(string title, string iconName)
 		{
-			// Run cells are visual only in this scope. A left-click
-			// on the Edit column opens the edit dialog for that row,
-			// while the Remove column asks for confirmation first.
+			// A left-click on the Run column launches the profile under
+			// bwrap, Edit opens the edit dialog, and Remove asks for
+			// confirmation first.
 			var icon = new CellRendererPixbuf();
 			icon.IconName = iconName;
 			var text = new CellRendererText();

@@ -12,8 +12,8 @@ namespace UrnWrapper
 		{
 			Application.Init();
 
-			// Ensure config.json exists and is valid. Values are reserved
-			// for future bwrap template expansion and intentionally unused.
+			// Ensure config.json exists and is valid. Its values feed
+			// the bwrap template used by the Run action.
 			AppStorage.LoadConfig();
 
 			Window mainWindow = MainWindow.Build();
