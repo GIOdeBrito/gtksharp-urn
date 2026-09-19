@@ -42,9 +42,16 @@ namespace UrnWrapper.UI
 				AddItemDialog.Show(window, store, filter, items);
 			};
 
+			var configButton = new Button("Config");
+			configButton.Clicked += (sender, args) =>
+			{
+				ConfigDialog.Show(window);
+			};
+
 			var headerBar = new Box(Orientation.Horizontal, 6);
 			headerBar.PackStart(searchEntry, true, true, 0);
 			headerBar.PackStart(addButton, false, false, 0);
+			headerBar.PackStart(configButton, false, false, 0);
 
 			ScrolledWindow tableContainer = BuildTableContainer(filter);
 

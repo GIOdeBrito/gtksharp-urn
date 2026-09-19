@@ -3,5 +3,6 @@ services:
         build: .
         volumes:
             - ./Project:/src
+            - ./bin:/urnoutput/bin
             - ./entrypoint.sh:/entrypoint.sh:ro
         tty: true
