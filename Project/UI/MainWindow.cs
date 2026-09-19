@@ -11,6 +11,7 @@ namespace UrnWrapper.UI
 		private const string WindowTitle = "UrnWrapper";
 		private const string SearchPlaceholder = "Search...";
 		private const int MaxDrainIterations = 1000;
+		private static bool isDialogOpen;
 
 		internal static Window Build()
 		{
@@ -89,18 +90,14 @@ namespace UrnWrapper.UI
 			table.AppendColumn(BuildTextColumn("Last executed", StoreColumns.LastExecuted));
 
 			TreeViewColumn editColumn = BuildActionColumn("Edit", "document-edit-symbolic");
+			TreeViewColumn removeColumn = BuildActionColumn("Remove", "edit-delete-symbolic");
 			table.AppendColumn(BuildActionColumn("Run", "media-playback-start-symbolic"));
 			table.AppendColumn(editColumn);
-			table.AppendColumn(BuildActionColumn("Remove", "edit-delete-symbolic"));
-
-			table.RowActivated += (sender, args) =>
-			{
-				EditActivatedRow(parent, store, filter, items, args.Path);
-			};
+			table.AppendColumn(removeColumn);
 
 			table.ButtonPressEvent += (sender, args) =>
 			{
-				EditColumnIfClicked(parent, table, store, filter, items, editColumn, args);
+				DispatchActionClick(parent, table, store, filter, items, editColumn, removeColumn, args);
 			};
 
 			return table;
@@ -115,7 +112,7 @@ namespace UrnWrapper.UI
 			return scrolledWindow;
 		}
 
-		private static void EditColumnIfClicked(Window parent, TreeView table, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreeViewColumn editColumn, ButtonPressEventArgs args)
+		private static void DispatchActionClick(Window parent, TreeView table, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreeViewColumn editColumn, TreeViewColumn removeColumn, ButtonPressEventArgs args)
 		{
 			if (args.Event == null)
 			{
@@ -137,50 +134,108 @@ namespace UrnWrapper.UI
 				return;
 			}
 
-			if (clickedPath == null)
+			if (!TryGetStoreIter(filter, clickedPath, out TreeIter storeIter))
 			{
 				return;
 			}
 
-			if (clickedColumn != editColumn)
+			if (clickedColumn == editColumn)
 			{
+				EditStoreRow(parent, store, filter, items, storeIter);
 				return;
 			}
 
-			EditActivatedRow(parent, store, filter, items, clickedPath);
+			if (clickedColumn == removeColumn)
+			{
+				RemoveStoreRow(parent, store, filter, items, storeIter);
+				return;
+			}
 		}
 
-		private static void EditActivatedRow(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreePath path)
+		private static bool TryGetStoreIter(TreeModelFilter filter, TreePath? path, out TreeIter storeIter)
 		{
+			storeIter = TreeIter.Zero;
+
 			if (path == null)
 			{
-				return;
+				return false;
 			}
 
 			if (!filter.GetIter(out TreeIter filterIter, path))
 			{
-				return;
+				return false;
 			}
 
-			TreeIter storeIter = filter.ConvertIterToChildIter(filterIter);
-			EditStoreRow(parent, store, filter, items, storeIter);
+			storeIter = filter.ConvertIterToChildIter(filterIter);
+			return true;
 		}
 
 		private static void EditStoreRow(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreeIter storeIter)
 		{
+			if (isDialogOpen)
+			{
+				return;
+			}
+
+			if (!TryResolveRow(store, items, storeIter, out int itemIndex))
+			{
+				return;
+			}
+
+			isDialogOpen = true;
+
+			try
+			{
+				EditItemDialog.Show(parent, store, filter, items, itemIndex, storeIter);
+			}
+			finally
+			{
+				isDialogOpen = false;
+			}
+		}
+
+		private static void RemoveStoreRow(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreeIter storeIter)
+		{
+			if (isDialogOpen)
+			{
+				return;
+			}
+
+			if (!TryResolveRow(store, items, storeIter, out int itemIndex))
+			{
+				return;
+			}
+
+			isDialogOpen = true;
+
+			try
+			{
+				RemoveItemDialog.Show(parent, store, filter, items, itemIndex, storeIter);
+			}
+			finally
+			{
+				isDialogOpen = false;
+			}
+		}
+
+		private static bool TryResolveRow(ListStore store, List<SandboxProfile> items, TreeIter storeIter, out int itemIndex)
+		{
 			string? name = store.GetValue(storeIter, StoreColumns.Name) as string;
+
 			if (string.IsNullOrEmpty(name))
 			{
-				return;
+				itemIndex = -1;
+				return false;
 			}
 
-			int itemIndex = FindItemIndex(items, name);
+			itemIndex = FindItemIndex(items, name);
+
 			if (itemIndex < 0)
 			{
-				return;
+				return false;
 			}
 
-			EditItemDialog.Show(parent, store, filter, items, itemIndex, storeIter);
+			return true;
 		}
 
 		private static int FindItemIndex(List<SandboxProfile> items, string name)
@@ -209,8 +264,9 @@ namespace UrnWrapper.UI
 
 		private static TreeViewColumn BuildActionColumn(string title, string iconName)
 		{
-			// Run/Remove cells are visual only in this scope. A left-click
-			// on the Edit column opens the edit dialog for that row.
+			// Run cells are visual only in this scope. A left-click
+			// on the Edit column opens the edit dialog for that row,
+			// while the Remove column asks for confirmation first.
 			var icon = new CellRendererPixbuf();
 			icon.IconName = iconName;
 			var text = new CellRendererText();
