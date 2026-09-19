@@ -33,12 +33,15 @@ namespace UrnWrapper.UI
 				var commandEntry = new Entry();
 				commandEntry.Text = original.Command;
 
+				SandboxPermissionControls permissions = SandboxPermissionControls.FromOptions(AppStorage.NormalizeOptions(original.Options));
+
 				Box contentArea = dialog.ContentArea;
 				contentArea.Spacing = 6;
 				contentArea.Margin = 6;
 
 				contentArea.PackStart(BuildLabeledRow("Name:", nameEntry), false, false, 0);
 				contentArea.PackStart(BuildLabeledRow("Command:", commandEntry), false, false, 0);
+				contentArea.PackStart(permissions.BuildFrame(), false, false, 0);
 
 				dialog.ShowAll();
 
@@ -68,12 +71,12 @@ namespace UrnWrapper.UI
 					return;
 				}
 
-				if (IsUnchanged(original, name, command))
+				if (IsUnchanged(original, name, command, permissions.ToOptions()))
 				{
 					return;
 				}
 
-				var updated = new SandboxProfile(name, command, original.LastExecuted);
+				var updated = new SandboxProfile(name, command, original.LastExecuted, permissions.ToOptions());
 				items[itemIndex] = updated;
 
 				if (!AppStorage.TrySaveItems(AppStorage.GetItemsFilePath(), items))
@@ -121,7 +124,7 @@ namespace UrnWrapper.UI
 			return false;
 		}
 
-		private static bool IsUnchanged(SandboxProfile original, string name, string command)
+		private static bool IsUnchanged(SandboxProfile original, string name, string command, SandboxOptions options)
 		{
 			if (!string.Equals(original.Name, name, StringComparison.Ordinal))
 			{
@@ -129,6 +132,13 @@ namespace UrnWrapper.UI
 			}
 
 			if (!string.Equals(original.Command, command, StringComparison.Ordinal))
+			{
+				return false;
+			}
+
+			SandboxOptions effective = AppStorage.NormalizeOptions(original.Options);
+
+			if (!effective.Equals(options))
 			{
 				return false;
 			}

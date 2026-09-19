@@ -18,6 +18,7 @@ namespace UrnWrapper.UI
 		private const string SandboxDataPlaceholder = "%sandboxData%";
 		private const string ProgramPathPlaceholder = "%programPath%";
 		private const string ProgramDirPlaceholder = "%programDir%";
+		private const string OptionalArgsPlaceholder = "%optionalArgs%";
 		private const string XdgRuntimeDirPlaceholder = "%xdgRuntimeDir%";
 		private const string DisplayPlaceholder = "%display%";
 		private const string WaylandDisplayPlaceholder = "%waylandDisplay%";
@@ -102,8 +103,9 @@ namespace UrnWrapper.UI
 			string xdgRuntimeDir = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR") ?? string.Empty;
 			string display = Environment.GetEnvironmentVariable("DISPLAY") ?? string.Empty;
 			string waylandDisplay = Environment.GetEnvironmentVariable("WAYLAND_DISPLAY") ?? string.Empty;
+			SandboxOptions options = AppStorage.NormalizeOptions(target.Options);
 
-			string expandedCommand = ExpandCommand(config.DefaultCommand, config.DefaultHome, AppStorage.SandboxHome, programCommand, programDir, xdgRuntimeDir, display, waylandDisplay);
+			string expandedCommand = ExpandCommand(config.DefaultCommand, config.DefaultHome, AppStorage.SandboxHome, programCommand, programDir, xdgRuntimeDir, display, waylandDisplay, options);
 
 			if (string.IsNullOrWhiteSpace(expandedCommand))
 			{
@@ -127,7 +129,7 @@ namespace UrnWrapper.UI
 			}
 		}
 
-		internal static string ExpandCommand(string template, string defaultHome, string sandboxHome, string programPath, string programDir, string xdgRuntimeDir, string display, string waylandDisplay)
+		internal static string ExpandCommand(string template, string defaultHome, string sandboxHome, string programPath, string programDir, string xdgRuntimeDir, string display, string waylandDisplay, SandboxOptions? options)
 		{
 			if (template == null)
 			{
@@ -137,8 +139,10 @@ namespace UrnWrapper.UI
 			string sandboxConfig = sandboxHome.TrimEnd('/') + "/.config";
 			string sandboxCache = sandboxHome.TrimEnd('/') + "/.cache";
 			string sandboxData = sandboxHome.TrimEnd('/') + "/.local/share";
+			string optionalArgs = BuildOptionalArgs(options, xdgRuntimeDir, display, waylandDisplay);
 
 			return template
+				.Replace(OptionalArgsPlaceholder, optionalArgs, StringComparison.Ordinal)
 				.Replace(DefaultHomePlaceholder, QuoteForShell(defaultHome), StringComparison.Ordinal)
 				.Replace(SandboxConfigPlaceholder, QuoteForShell(sandboxConfig), StringComparison.Ordinal)
 				.Replace(SandboxCachePlaceholder, QuoteForShell(sandboxCache), StringComparison.Ordinal)
@@ -149,6 +153,95 @@ namespace UrnWrapper.UI
 				.Replace(DisplayPlaceholder, QuoteForShell(display), StringComparison.Ordinal)
 				.Replace(WaylandDisplayPlaceholder, QuoteForShell(waylandDisplay), StringComparison.Ordinal)
 				.Replace(ProgramPathPlaceholder, QuoteForShell(programPath), StringComparison.Ordinal);
+		}
+
+		internal static string BuildOptionalArgs(SandboxOptions? options, string xdgRuntimeDir, string display, string waylandDisplay)
+		{
+			SandboxOptions effective = AppStorage.NormalizeOptions(options);
+			var fragments = new List<string>();
+
+			if (effective.ShareNetwork)
+			{
+				fragments.Add("--share-net");
+			}
+
+			if (effective.AllowGpu)
+			{
+				fragments.Add("--dev-bind-try /dev/dri /dev/dri");
+			}
+
+			if (effective.AllowX11)
+			{
+				fragments.Add("--bind-try /tmp/.X11-unix /tmp/.X11-unix --setenv DISPLAY " + QuoteForShell(display));
+			}
+
+			if (effective.AllowWayland)
+			{
+				AppendWaylandArgs(fragments, xdgRuntimeDir, waylandDisplay);
+			}
+
+			if (effective.AllowAudio)
+			{
+				AppendAudioArgs(fragments, xdgRuntimeDir);
+			}
+
+			if (fragments.Count == 0)
+			{
+				return string.Empty;
+			}
+
+			return " " + string.Join(" ", fragments);
+		}
+
+		private static void AppendWaylandArgs(List<string> fragments, string xdgRuntimeDir, string waylandDisplay)
+		{
+			// Bind only the single Wayland socket instead of the whole XDG dir,
+			// so the Wayland toggle stays independent from the Audio toggle.
+			// bind-try keeps missing sockets a safe no-op.
+			if (IsBareSocketName(waylandDisplay) && !string.IsNullOrWhiteSpace(xdgRuntimeDir))
+			{
+				string source = xdgRuntimeDir.TrimEnd('/') + "/" + waylandDisplay.Trim();
+				string target = "/run/" + waylandDisplay.Trim();
+				fragments.Add("--bind-try " + QuoteForShell(source) + " " + QuoteForShell(target));
+			}
+
+			fragments.Add("--setenv WAYLAND_DISPLAY " + QuoteForShell(waylandDisplay));
+		}
+
+		private static void AppendAudioArgs(List<string> fragments, string xdgRuntimeDir)
+		{
+			// PulseAudio and PipeWire sockets both live under XDG_RUNTIME_DIR.
+			// bind-try keeps absent daemons a safe no-op.
+			if (!string.IsNullOrWhiteSpace(xdgRuntimeDir))
+			{
+				string baseDir = xdgRuntimeDir.TrimEnd('/');
+				fragments.Add("--bind-try " + QuoteForShell(baseDir + "/pulse") + " " + QuoteForShell("/run/pulse"));
+				fragments.Add("--bind-try " + QuoteForShell(baseDir + "/pipewire-0") + " " + QuoteForShell("/run/pipewire-0"));
+			}
+
+			fragments.Add("--setenv PULSE_SERVER " + QuoteForShell("unix:/run/pulse/native"));
+		}
+
+		private static bool IsBareSocketName(string? value)
+		{
+			if (string.IsNullOrWhiteSpace(value))
+			{
+				return false;
+			}
+
+			string trimmed = value.Trim();
+
+			if (trimmed.Contains('/', StringComparison.Ordinal))
+			{
+				return false;
+			}
+
+			if (trimmed.Contains("..", StringComparison.Ordinal))
+			{
+				return false;
+			}
+
+			return true;
 		}
 
 		private static string ResolveProgramDir(string programCommand)
@@ -208,7 +301,7 @@ namespace UrnWrapper.UI
 			}
 
 			SandboxProfile current = items[itemIndex];
-			var stamped = new SandboxProfile(current.Name, current.Command, DateTime.Now);
+			var stamped = new SandboxProfile(current.Name, current.Command, DateTime.Now, current.Options);
 			items[itemIndex] = stamped;
 
 			if (!AppStorage.TrySaveItems(AppStorage.GetItemsFilePath(), items))

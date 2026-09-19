@@ -17,6 +17,7 @@ namespace UrnWrapper.UI
 
 				var nameEntry = new Entry();
 				var commandEntry = new Entry();
+				SandboxPermissionControls permissions = SandboxPermissionControls.FromOptions(AppStorage.DefaultOptions);
 
 				Box contentArea = dialog.ContentArea;
 				contentArea.Spacing = 6;
@@ -24,6 +25,7 @@ namespace UrnWrapper.UI
 
 				contentArea.PackStart(BuildLabeledRow("Name:", nameEntry), false, false, 0);
 				contentArea.PackStart(BuildLabeledRow("Command:", commandEntry), false, false, 0);
+				contentArea.PackStart(permissions.BuildFrame(), false, false, 0);
 
 				dialog.ShowAll();
 
@@ -53,7 +55,7 @@ namespace UrnWrapper.UI
 					return;
 				}
 
-				var profile = new SandboxProfile(name, command, null);
+				var profile = new SandboxProfile(name, command, null, permissions.ToOptions());
 				items.Add(profile);
 
 				if (!AppStorage.TrySaveItems(AppStorage.GetItemsFilePath(), items))

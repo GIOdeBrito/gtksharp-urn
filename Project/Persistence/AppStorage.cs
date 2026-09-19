@@ -14,19 +14,22 @@ namespace UrnWrapper.Persistence
 		private const string LegacySysfsMarker = "--sysfs";
 
 		internal const string SandboxHome = "/home/sandbox";
+		internal const string OptionalArgsPlaceholder = "%optionalArgs%";
+		private const string ProgramDirMarker = " --ro-bind-try %programDir%";
 
-		internal const string DefaultCommandTemplate = "bwrap --unshare-all --share-net --die-with-parent --new-session"
+		internal const string DefaultCommandTemplate = "bwrap --unshare-all --die-with-parent --new-session"
 			+ " --ro-bind /usr /usr --ro-bind /etc /etc --ro-bind /opt /opt"
 			+ " --symlink usr/lib /lib --symlink usr/lib64 /lib64 --symlink usr/bin /bin --symlink usr/sbin /sbin"
 			+ " --proc /proc --dev /dev --ro-bind-try /sys /sys --tmpfs /tmp --tmpfs /run"
-			+ " --dev-bind-try /dev/dri /dev/dri --dev-bind-try /dev/fuse /dev/fuse"
+			+ " --dev-bind-try /dev/fuse /dev/fuse"
 			+ " --ro-bind-try /etc/fonts /etc/fonts --ro-bind-try /usr/share/fonts /usr/share/fonts --ro-bind-try /etc/ssl /etc/ssl"
-			+ " --bind-try /tmp/.X11-unix /tmp/.X11-unix --bind-try %xdgRuntimeDir% %xdgRuntimeDir%"
+			+ "%optionalArgs%"
 			+ " --dir %sandboxHome% --bind %defaultHomeDir% %sandboxHome%"
 			+ " --setenv HOME %sandboxHome% --setenv XDG_CONFIG_HOME %sandboxConfig% --setenv XDG_CACHE_HOME %sandboxCache% --setenv XDG_DATA_HOME %sandboxData% --setenv XDG_RUNTIME_DIR /run"
-			+ " --setenv DISPLAY %display% --setenv WAYLAND_DISPLAY %waylandDisplay%"
 			+ " --chdir %sandboxHome%"
 			+ " --ro-bind-try %programDir% %programDir% -- %programPath%";
+
+		internal static readonly SandboxOptions DefaultOptions = new SandboxOptions(true, true, true, true, false);
 
 		internal static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
 		{
@@ -58,12 +61,43 @@ namespace UrnWrapper.Persistence
 			{
 				string json = File.ReadAllText(filePath);
 				List<SandboxProfile>? items = JsonSerializer.Deserialize<List<SandboxProfile>>(json, JsonOptions);
-				return items ?? new List<SandboxProfile>();
+
+				if (items == null)
+				{
+					return new List<SandboxProfile>();
+				}
+
+				NormalizeItemOptions(items);
+				return items;
 			}
 			catch (Exception exception) when (exception is JsonException || exception is IOException || exception is UnauthorizedAccessException)
 			{
 				BackupCorruptFile(filePath);
 				return new List<SandboxProfile>();
+			}
+		}
+
+		internal static SandboxOptions NormalizeOptions(SandboxOptions? options)
+		{
+			if (options != null)
+			{
+				return options;
+			}
+
+			return DefaultOptions;
+		}
+
+		private static void NormalizeItemOptions(List<SandboxProfile> items)
+		{
+			for (int i = 0; i < items.Count; i++)
+			{
+				if (items[i].Options != null)
+				{
+					continue;
+				}
+
+				SandboxProfile current = items[i];
+				items[i] = new SandboxProfile(current.Name, current.Command, current.LastExecuted, DefaultOptions);
 			}
 		}
 
@@ -96,6 +130,11 @@ namespace UrnWrapper.Persistence
 				if (IsUnsafeTemplate(config.DefaultCommand))
 				{
 					return MigrateToSecureDefaults(filePath, config.DefaultHome);
+				}
+
+				if (!config.DefaultCommand.Contains(OptionalArgsPlaceholder, StringComparison.Ordinal))
+				{
+					return MigrateTemplateToOptionalArgs(filePath, config);
 				}
 
 				return config;
@@ -173,6 +212,50 @@ namespace UrnWrapper.Persistence
 			var migrated = new Config(defaultHome, DefaultCommandTemplate);
 			TrySaveConfig(filePath, migrated);
 			return migrated;
+		}
+
+		private static Config MigrateTemplateToOptionalArgs(string filePath, Config config)
+		{
+			// Configs saved before per-program toggles hardcode network, GPU,
+			// X11, Wayland and the coarse XDG bind. Strip those so the new
+			// toggles are the single source of truth, then insert the slot.
+			string stripped = StripLegacyOptionalFlags(config.DefaultCommand);
+			string? expanded = InsertOptionalPlaceholder(stripped);
+
+			if (expanded == null)
+			{
+				return MigrateToSecureDefaults(filePath, config.DefaultHome);
+			}
+
+			var migrated = new Config(config.DefaultHome, expanded);
+			TrySaveConfig(filePath, migrated);
+			return migrated;
+		}
+
+		private static string StripLegacyOptionalFlags(string template)
+		{
+			return template
+				.Replace(" --share-net", string.Empty, StringComparison.Ordinal)
+				.Replace(" --dev-bind-try /dev/dri /dev/dri", string.Empty, StringComparison.Ordinal)
+				.Replace(" --bind-try /tmp/.X11-unix /tmp/.X11-unix", string.Empty, StringComparison.Ordinal)
+				.Replace(" --bind-try %xdgRuntimeDir% %xdgRuntimeDir%", string.Empty, StringComparison.Ordinal)
+				.Replace(" --setenv DISPLAY %display%", string.Empty, StringComparison.Ordinal)
+				.Replace(" --setenv WAYLAND_DISPLAY %waylandDisplay%", string.Empty, StringComparison.Ordinal);
+		}
+
+		private static string? InsertOptionalPlaceholder(string template)
+		{
+			if (template.Contains(OptionalArgsPlaceholder, StringComparison.Ordinal))
+			{
+				return template;
+			}
+
+			if (!template.Contains(ProgramDirMarker, StringComparison.Ordinal))
+			{
+				return null;
+			}
+
+			return template.Replace(ProgramDirMarker, OptionalArgsPlaceholder + ProgramDirMarker, StringComparison.Ordinal);
 		}
 
 		private static bool IsUnsafeTemplate(string template)
