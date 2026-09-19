@@ -6,17 +6,32 @@ using UrnWrapper.Persistence;
 
 namespace UrnWrapper.UI
 {
-	internal static class AddItemDialog
+	internal static class EditItemDialog
 	{
-		internal static void Show(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items)
+		internal static void Show(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, int itemIndex, TreeIter storeIter)
 		{
-			using (var dialog = new Dialog("Add Item", parent, DialogFlags.Modal))
+			if (itemIndex < 0)
+			{
+				return;
+			}
+
+			if (itemIndex >= items.Count)
+			{
+				return;
+			}
+
+			SandboxProfile original = items[itemIndex];
+
+			using (var dialog = new Dialog("Edit Item", parent, DialogFlags.Modal))
 			{
 				dialog.AddButton("Cancel", ResponseType.Cancel);
-				dialog.AddButton("Add", ResponseType.Accept);
+				dialog.AddButton("Save", ResponseType.Accept);
 
 				var nameEntry = new Entry();
+				nameEntry.Text = original.Name;
+
 				var commandEntry = new Entry();
+				commandEntry.Text = original.Command;
 
 				Box contentArea = dialog.ContentArea;
 				contentArea.Spacing = 6;
@@ -47,23 +62,30 @@ namespace UrnWrapper.UI
 					return;
 				}
 
-				if (IsDuplicateName(items, name))
+				if (IsDuplicateName(items, name, itemIndex))
 				{
 					ShowError(parent, "An item with that name already exists.");
 					return;
 				}
 
-				var profile = new SandboxProfile(name, command, null);
-				items.Add(profile);
+				if (IsUnchanged(original, name, command))
+				{
+					return;
+				}
+
+				var updated = new SandboxProfile(name, command, original.LastExecuted);
+				items[itemIndex] = updated;
 
 				if (!AppStorage.TrySaveItems(AppStorage.GetItemsFilePath(), items))
 				{
-					items.RemoveAt(items.Count - 1);
+					items[itemIndex] = original;
 					ShowError(parent, "Could not save items.json.");
 					return;
 				}
 
-				store.AppendValues(profile.Name, ProfileFormatting.FormatLastExecuted(profile.LastExecuted), profile.Command);
+				store.SetValue(storeIter, StoreColumns.Name, updated.Name);
+				store.SetValue(storeIter, StoreColumns.LastExecuted, ProfileFormatting.FormatLastExecuted(updated.LastExecuted));
+				store.SetValue(storeIter, StoreColumns.Command, updated.Command);
 				filter.Refilter();
 			}
 		}
@@ -81,17 +103,37 @@ namespace UrnWrapper.UI
 			return row;
 		}
 
-		private static bool IsDuplicateName(List<SandboxProfile> items, string name)
+		private static bool IsDuplicateName(List<SandboxProfile> items, string name, int editedIndex)
 		{
-			foreach (SandboxProfile profile in items)
+			for (int i = 0; i < items.Count; i++)
 			{
-				if (string.Equals(profile.Name, name, StringComparison.OrdinalIgnoreCase))
+				if (i == editedIndex)
+				{
+					continue;
+				}
+
+				if (string.Equals(items[i].Name, name, StringComparison.OrdinalIgnoreCase))
 				{
 					return true;
 				}
 			}
 
 			return false;
+		}
+
+		private static bool IsUnchanged(SandboxProfile original, string name, string command)
+		{
+			if (!string.Equals(original.Name, name, StringComparison.Ordinal))
+			{
+				return false;
+			}
+
+			if (!string.Equals(original.Command, command, StringComparison.Ordinal))
+			{
+				return false;
+			}
+
+			return true;
 		}
 
 		private static void ShowError(Window parent, string message)

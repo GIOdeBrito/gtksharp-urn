@@ -36,7 +36,6 @@ namespace UrnWrapper.UI
 
 				ResponseType response = (ResponseType)dialog.Run();
 				string newHome = homeEntry.Text.Trim();
-				dialog.Destroy();
 
 				if (response != ResponseType.Accept)
 				{
@@ -91,7 +90,6 @@ namespace UrnWrapper.UI
 
 				ResponseType response = (ResponseType)chooser.Run();
 				string? picked = chooser.Filename;
-				chooser.Destroy();
 
 				if (response != ResponseType.Accept)
 				{
@@ -127,7 +125,6 @@ namespace UrnWrapper.UI
 			using (var error = new MessageDialog(parent, DialogFlags.Modal, MessageType.Error, ButtonsType.Ok, message))
 			{
 				error.Run();
-				error.Destroy();
 			}
 		}
 	}

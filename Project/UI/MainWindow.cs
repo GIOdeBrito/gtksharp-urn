@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Gtk;
 using UrnWrapper.Models;
@@ -42,6 +43,14 @@ namespace UrnWrapper.UI
 				AddItemDialog.Show(window, store, filter, items);
 			};
 
+			TreeView table = BuildProfileTable(window, store, filter, items);
+
+			var editButton = new Button("Edit");
+			editButton.Clicked += (sender, args) =>
+			{
+				EditSelectedEntry(window, table, store, filter, items);
+			};
+
 			var configButton = new Button("Config");
 			configButton.Clicked += (sender, args) =>
 			{
@@ -51,9 +60,10 @@ namespace UrnWrapper.UI
 			var headerBar = new Box(Orientation.Horizontal, 6);
 			headerBar.PackStart(searchEntry, true, true, 0);
 			headerBar.PackStart(addButton, false, false, 0);
+			headerBar.PackStart(editButton, false, false, 0);
 			headerBar.PackStart(configButton, false, false, 0);
 
-			ScrolledWindow tableContainer = BuildTableContainer(filter);
+			ScrolledWindow tableContainer = WrapInScrolledWindow(table);
 
 			layout.PackStart(headerBar, false, false, 0);
 			layout.PackStart(tableContainer, true, true, 0);
@@ -78,20 +88,103 @@ namespace UrnWrapper.UI
 			}
 		}
 
-		private static ScrolledWindow BuildTableContainer(TreeModelFilter filter)
+		private static TreeView BuildProfileTable(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items)
 		{
 			var table = new TreeView(filter);
+			table.Selection.Mode = SelectionMode.Single;
 			table.AppendColumn(BuildTextColumn("Name", StoreColumns.Name));
 			table.AppendColumn(BuildTextColumn("Last executed", StoreColumns.LastExecuted));
 
 			TreeViewColumn actionColumn = BuildActionColumn();
 			table.AppendColumn(actionColumn);
 
+			table.RowActivated += (sender, args) =>
+			{
+				EditActivatedRow(parent, store, filter, items, args.Path);
+			};
+
+			return table;
+		}
+
+		private static ScrolledWindow WrapInScrolledWindow(TreeView table)
+		{
 			var scrolledWindow = new ScrolledWindow();
 			scrolledWindow.ShadowType = ShadowType.In;
 			scrolledWindow.Add(table);
 
 			return scrolledWindow;
+		}
+
+		private static void EditSelectedEntry(Window parent, TreeView table, ListStore store, TreeModelFilter filter, List<SandboxProfile> items)
+		{
+			if (!table.Selection.GetSelected(out ITreeModel selectedModel, out TreeIter selectedIter))
+			{
+				ShowSelectItemHint(parent);
+				return;
+			}
+
+			var selectedFilter = selectedModel as TreeModelFilter;
+			if (selectedFilter == null)
+			{
+				return;
+			}
+
+			TreeIter storeIter = selectedFilter.ConvertIterToChildIter(selectedIter);
+			EditStoreRow(parent, store, filter, items, storeIter);
+		}
+
+		private static void EditActivatedRow(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreePath path)
+		{
+			if (path == null)
+			{
+				return;
+			}
+
+			if (!filter.GetIter(out TreeIter filterIter, path))
+			{
+				return;
+			}
+
+			TreeIter storeIter = filter.ConvertIterToChildIter(filterIter);
+			EditStoreRow(parent, store, filter, items, storeIter);
+		}
+
+		private static void EditStoreRow(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreeIter storeIter)
+		{
+			string? name = store.GetValue(storeIter, StoreColumns.Name) as string;
+			if (string.IsNullOrEmpty(name))
+			{
+				return;
+			}
+
+			int itemIndex = FindItemIndex(items, name);
+			if (itemIndex < 0)
+			{
+				return;
+			}
+
+			EditItemDialog.Show(parent, store, filter, items, itemIndex, storeIter);
+		}
+
+		private static int FindItemIndex(List<SandboxProfile> items, string name)
+		{
+			for (int i = 0; i < items.Count; i++)
+			{
+				if (string.Equals(items[i].Name, name, StringComparison.OrdinalIgnoreCase))
+				{
+					return i;
+				}
+			}
+
+			return -1;
+		}
+
+		private static void ShowSelectItemHint(Window parent)
+		{
+			using (var hint = new MessageDialog(parent, DialogFlags.Modal, MessageType.Info, ButtonsType.Ok, "Select an item to edit."))
+			{
+				hint.Run();
+			}
 		}
 
 		private static TreeViewColumn BuildTextColumn(string title, int columnIndex)
@@ -107,8 +200,8 @@ namespace UrnWrapper.UI
 
 		private static TreeViewColumn BuildActionColumn()
 		{
-			// Intentionally visual only: the Run/Edit/Remove cells are not
-			// wired to any handler in this cleanup scope.
+			// Run/Remove cells are visual only in this scope. Edit runs
+			// through the header Edit button and row double-click.
 			var runIcon = new CellRendererPixbuf();
 			runIcon.IconName = "media-playback-start-symbolic";
 			var runText = new CellRendererText();
