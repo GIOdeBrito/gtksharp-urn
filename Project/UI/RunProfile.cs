@@ -185,6 +185,11 @@ namespace UrnWrapper.UI
 				AppendAudioArgs(fragments, xdgRuntimeDir);
 			}
 
+			if (effective.AllowAppImage)
+			{
+				AppendAppImageArgs(fragments);
+			}
+
 			if (fragments.Count == 0)
 			{
 				return string.Empty;
@@ -220,6 +225,20 @@ namespace UrnWrapper.UI
 			}
 
 			fragments.Add("--setenv PULSE_SERVER " + QuoteForShell("unix:/run/pulse/native"));
+		}
+
+		private static void AppendAppImageArgs(List<string> fragments)
+		{
+			// Type2 AppImages mount squashfs via fusermount on PATH plus /dev/fuse.
+			// The device alone is already in the core template and inert without
+			// a helper; the helper binaries below make the toggle effective.
+			// bind-try keeps distro-specific paths a safe no-op.
+			fragments.Add("--dev-bind-try /dev/fuse /dev/fuse");
+			fragments.Add("--ro-bind-try /usr/bin/fusermount /usr/bin/fusermount");
+			fragments.Add("--ro-bind-try /usr/bin/fusermount3 /usr/bin/fusermount3");
+			fragments.Add("--ro-bind-try /bin/fusermount /bin/fusermount");
+			fragments.Add("--ro-bind-try /bin/fusermount3 /bin/fusermount3");
+			fragments.Add("--ro-bind-try /etc/fuse.conf /etc/fuse.conf");
 		}
 
 		private static bool IsBareSocketName(string? value)

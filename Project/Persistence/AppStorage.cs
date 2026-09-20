@@ -29,7 +29,7 @@ namespace UrnWrapper.Persistence
 			+ " --chdir %sandboxHome%"
 			+ " --ro-bind-try %programDir% %programDir% -- %programPath%";
 
-		internal static readonly SandboxOptions DefaultOptions = new SandboxOptions(true, true, true, true, false);
+		internal static readonly SandboxOptions DefaultOptions = new SandboxOptions(true, true, true, true, false, false);
 
 		internal static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
 		{

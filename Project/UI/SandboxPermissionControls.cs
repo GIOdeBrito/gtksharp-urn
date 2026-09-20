@@ -11,6 +11,7 @@ namespace UrnWrapper.UI
 		internal CheckButton X11Check { get; }
 		internal CheckButton WaylandCheck { get; }
 		internal CheckButton AudioCheck { get; }
+		internal CheckButton AppImageCheck { get; }
 
 		private SandboxPermissionControls(SandboxOptions options)
 		{
@@ -19,6 +20,7 @@ namespace UrnWrapper.UI
 			X11Check = BuildCheck("X11 (/tmp/.X11-unix + DISPLAY)", "Expose the X11 socket and DISPLAY variable.", options.AllowX11);
 			WaylandCheck = BuildCheck("Wayland (socket + WAYLAND_DISPLAY)", "Expose only the Wayland socket, not the whole runtime dir.", options.AllowWayland);
 			AudioCheck = BuildCheck("Audio (Pulse/PipeWire)", "Expose audio sockets and set PULSE_SERVER.", options.AllowAudio);
+			AppImageCheck = BuildCheck("AppImage / FUSE (fusermount)", "Expose FUSE helpers for Type2 AppImages. Increases kernel surface, enable only for AppImages.", options.AllowAppImage);
 		}
 
 		internal static SandboxPermissionControls FromOptions(SandboxOptions? options)
@@ -34,7 +36,8 @@ namespace UrnWrapper.UI
 				GpuCheck.Active,
 				X11Check.Active,
 				WaylandCheck.Active,
-				AudioCheck.Active
+				AudioCheck.Active,
+				AppImageCheck.Active
 			);
 		}
 
@@ -46,6 +49,7 @@ namespace UrnWrapper.UI
 			list.PackStart(X11Check, false, false, 0);
 			list.PackStart(WaylandCheck, false, false, 0);
 			list.PackStart(AudioCheck, false, false, 0);
+			list.PackStart(AppImageCheck, false, false, 0);
 
 			var frame = new Frame("Sandbox permissions");
 			frame.Add(list);
