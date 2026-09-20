@@ -306,7 +306,7 @@ namespace UrnWrapper.UI
 		{
 			foreach (SandboxProfile profile in items)
 			{
-				store.AppendValues(profile.Name, ProfileFormatting.FormatLastExecuted(profile.LastExecuted), profile.Command);
+				store.AppendValues(profile.Name, ProfileFormatting.FormatLastExecuted(profile.LastExecuted), ProfileCommand.Combine(profile.Program, profile.Arguments));
 			}
 		}
 

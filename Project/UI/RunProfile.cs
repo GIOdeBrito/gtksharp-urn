@@ -107,9 +107,9 @@ namespace UrnWrapper.UI
 
 			SandboxProfile target = items[itemIndex];
 
-			if (string.IsNullOrWhiteSpace(target.Command))
+			if (string.IsNullOrWhiteSpace(target.Program))
 			{
-				ShowError(parent, "Command must not be empty.");
+				ShowError(parent, "Program must not be empty.");
 				return;
 			}
 
@@ -119,20 +119,12 @@ namespace UrnWrapper.UI
 				return;
 			}
 
-			string[] argv = SplitCommand(target.Command);
-
-			if (argv.Length == 0)
-			{
-				ShowError(parent, "Command must not be empty.");
-				return;
-			}
-
-			string programPath = argv[0];
-			string[] programArgs = argv.Length > 1 ? argv[1..] : Array.Empty<string>();
+			string programPath = target.Program.Trim();
+			string[] programArgs = SplitCommand(target.Arguments);
 
 			if (string.IsNullOrWhiteSpace(programPath))
 			{
-				ShowError(parent, "Command must not be empty.");
+				ShowError(parent, "Program must not be empty.");
 				return;
 			}
 
@@ -246,131 +238,7 @@ namespace UrnWrapper.UI
 
 		internal static string[] SplitCommand(string? command)
 		{
-			// Shell-word split so `prog --flag "quoted arg"` keeps one
-			// argv entry per word. Each entry is quoted separately later,
-			// so metacharacters stay inert under `sh -c`.
-			if (string.IsNullOrWhiteSpace(command))
-			{
-				return Array.Empty<string>();
-			}
-
-			var argv = new List<string>();
-			var current = new System.Text.StringBuilder();
-			bool inToken = false;
-			int i = 0;
-
-			while (i < command.Length)
-			{
-				char c = command[i];
-
-				if (!inToken)
-				{
-					if (char.IsWhiteSpace(c))
-					{
-						i++;
-						continue;
-					}
-
-					inToken = true;
-					continue;
-				}
-
-				if (char.IsWhiteSpace(c))
-				{
-					argv.Add(current.ToString());
-					current.Clear();
-					inToken = false;
-					i++;
-					continue;
-				}
-
-				if (c == '\'')
-				{
-					i = AppendSingleQuoted(command, i, current);
-					continue;
-				}
-
-				if (c == '"')
-				{
-					i = AppendDoubleQuoted(command, i, current);
-					continue;
-				}
-
-				if (c == '\\')
-				{
-					i = AppendEscaped(command, i, current);
-					continue;
-				}
-
-				current.Append(c);
-				i++;
-			}
-
-			if (inToken)
-			{
-				argv.Add(current.ToString());
-			}
-
-			return argv.ToArray();
-		}
-
-		private static int AppendSingleQuoted(string command, int quoteIndex, System.Text.StringBuilder current)
-		{
-			int i = quoteIndex + 1;
-
-			while (i < command.Length)
-			{
-				if (command[i] == '\'')
-				{
-					return i + 1;
-				}
-
-				current.Append(command[i]);
-				i++;
-			}
-
-			return i;
-		}
-
-		private static int AppendDoubleQuoted(string command, int quoteIndex, System.Text.StringBuilder current)
-		{
-			int i = quoteIndex + 1;
-
-			while (i < command.Length)
-			{
-				if (command[i] == '"')
-				{
-					return i + 1;
-				}
-
-				if (command[i] == '\\' && i + 1 < command.Length)
-				{
-					char next = command[i + 1];
-
-					if (next == '"' || next == '\\' || next == '$' || next == '`')
-					{
-						current.Append(next);
-						i += 2;
-						continue;
-					}
-				}
-
-				current.Append(command[i]);
-				i++;
-			}
-
-			return i;
-		}
-
-		private static int AppendEscaped(string command, int backslashIndex, System.Text.StringBuilder current)
-		{
-			if (backslashIndex + 1 >= command.Length)
-			{
-				return command.Length;
-			}
-
-			current.Append(command[backslashIndex + 1]);
-			return backslashIndex + 2;
+			return ProfileCommand.Split(command);
 		}
 
 		internal static string BuildOptionalArgs(SandboxOptions? options, string xdgRuntimeDir, string display, string waylandDisplay)
@@ -807,7 +675,7 @@ namespace UrnWrapper.UI
 			}
 
 			SandboxProfile current = items[itemIndex];
-			var stamped = new SandboxProfile(current.Name, current.Command, DateTime.Now, current.Options);
+			var stamped = new SandboxProfile(current.Name, current.Program, current.Arguments, DateTime.Now, current.Options);
 			items[itemIndex] = stamped;
 
 			if (!AppStorage.TrySaveItems(AppStorage.GetItemsFilePath(), items))

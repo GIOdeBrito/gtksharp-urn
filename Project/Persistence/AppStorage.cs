@@ -62,14 +62,15 @@ namespace UrnWrapper.Persistence
 			try
 			{
 				string json = File.ReadAllText(filePath);
-				List<SandboxProfile>? items = JsonSerializer.Deserialize<List<SandboxProfile>>(json, JsonOptions);
-
-				if (items == null)
-				{
-					return new List<SandboxProfile>();
-				}
+				List<SandboxProfile> items = ParseItems(json);
 
 				NormalizeItemOptions(items);
+
+				if (TryMigrateLegacyCommands(filePath, json, items))
+				{
+					return LoadItems();
+				}
+
 				return items;
 			}
 			catch (Exception exception) when (exception is JsonException || exception is IOException || exception is UnauthorizedAccessException)
@@ -77,6 +78,157 @@ namespace UrnWrapper.Persistence
 				BackupCorruptFile(filePath);
 				return new List<SandboxProfile>();
 			}
+		}
+
+		private static List<SandboxProfile> ParseItems(string json)
+		{
+			List<SandboxProfile>? items = JsonSerializer.Deserialize<List<SandboxProfile>>(json, JsonOptions);
+
+			if (items == null)
+			{
+				return new List<SandboxProfile>();
+			}
+
+			return items;
+		}
+
+		private static bool TryMigrateLegacyCommands(string filePath, string json, List<SandboxProfile> items)
+		{
+			// Files saved before the Program/Arguments split store a single
+			// "command" string. Split it once so old installs keep working
+			// and new code only ever sees the split shape. If the migrated
+			// file cannot be saved, keep the migrated list in memory so a
+			// read-only disk cannot cause infinite reloads.
+			List<SandboxProfile>? migrated = MigrateLegacyCommands(json, items);
+
+			if (migrated == null)
+			{
+				return false;
+			}
+
+			if (!TrySaveItems(filePath, migrated))
+			{
+				items.Clear();
+				items.AddRange(migrated);
+				return false;
+			}
+
+			return true;
+		}
+
+		private static List<SandboxProfile>? MigrateLegacyCommands(string json, List<SandboxProfile> items)
+		{
+			List<JsonElement> elements;
+
+			try
+			{
+				elements = JsonSerializer.Deserialize<List<JsonElement>>(json, JsonOptions) ?? new List<JsonElement>();
+			}
+			catch (JsonException)
+			{
+				return null;
+			}
+
+			if (elements.Count != items.Count)
+			{
+				return null;
+			}
+
+			bool migratedAny = false;
+			var migrated = new List<SandboxProfile>(items.Count);
+
+			for (int i = 0; i < items.Count; i++)
+			{
+				SandboxProfile current = items[i];
+
+				if (HasLegacyCommandOnly(elements[i], out string legacyCommand))
+				{
+					migrated.Add(SplitLegacyProfile(current, legacyCommand));
+					migratedAny = true;
+					continue;
+				}
+
+				migrated.Add(current);
+			}
+
+			if (!migratedAny)
+			{
+				return null;
+			}
+
+			return migrated;
+		}
+
+		private static bool HasLegacyCommandOnly(JsonElement element, out string legacyCommand)
+		{
+			legacyCommand = string.Empty;
+
+			if (element.ValueKind != JsonValueKind.Object)
+			{
+				return false;
+			}
+
+			bool hasProgram = false;
+			bool hasCommand = false;
+			string commandValue = string.Empty;
+
+			foreach (JsonProperty property in element.EnumerateObject())
+			{
+				if (string.Equals(property.Name, "program", StringComparison.OrdinalIgnoreCase))
+				{
+					hasProgram = true;
+				}
+
+				if (string.Equals(property.Name, "command", StringComparison.OrdinalIgnoreCase))
+				{
+					hasCommand = true;
+
+					if (property.Value.ValueKind == JsonValueKind.String)
+					{
+						commandValue = property.Value.GetString() ?? string.Empty;
+					}
+				}
+			}
+
+			if (!hasCommand)
+			{
+				return false;
+			}
+
+			if (hasProgram)
+			{
+				return false;
+			}
+
+			legacyCommand = commandValue;
+			return true;
+		}
+
+		private static SandboxProfile SplitLegacyProfile(SandboxProfile current, string legacyCommand)
+		{
+			string[] argv = ProfileCommand.Split(legacyCommand);
+
+			if (argv.Length == 0)
+			{
+				return new SandboxProfile(current.Name, string.Empty, string.Empty, current.LastExecuted, current.Options);
+			}
+
+			string program = argv[0];
+			string arguments = string.Empty;
+
+			if (argv.Length > 1)
+			{
+				var rest = new List<string>(argv.Length - 1);
+
+				for (int i = 1; i < argv.Length; i++)
+				{
+					rest.Add(argv[i]);
+				}
+
+				arguments = ProfileCommand.JoinQuoted(rest);
+			}
+
+			return new SandboxProfile(current.Name, program, arguments, current.LastExecuted, current.Options);
 		}
 
 		internal static SandboxOptions NormalizeOptions(SandboxOptions? options)
@@ -99,7 +251,7 @@ namespace UrnWrapper.Persistence
 				}
 
 				SandboxProfile current = items[i];
-				items[i] = new SandboxProfile(current.Name, current.Command, current.LastExecuted, DefaultOptions);
+				items[i] = new SandboxProfile(current.Name, current.Program, current.Arguments, current.LastExecuted, DefaultOptions);
 			}
 		}
 

@@ -14,10 +14,10 @@ namespace UrnWrapper.UI
 
 			string normalizedSearch = searchText.Trim();
 			string? name = model.GetValue(iter, StoreColumns.Name) as string;
-			string? command = model.GetValue(iter, StoreColumns.Command) as string;
+			string? program = model.GetValue(iter, StoreColumns.Program) as string;
 
 			return ContainsIgnoreCase(name, normalizedSearch)
-				|| ContainsIgnoreCase(command, normalizedSearch);
+				|| ContainsIgnoreCase(program, normalizedSearch);
 		}
 
 		private static bool ContainsIgnoreCase(string? source, string searchText)
