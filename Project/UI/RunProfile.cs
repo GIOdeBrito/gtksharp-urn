@@ -902,6 +902,7 @@ namespace UrnWrapper.UI
 		{
 			using (var error = new MessageDialog(parent, DialogFlags.Modal, MessageType.Error, ButtonsType.Ok, message))
 			{
+				DialogSizing.ApplyMessage(error);
 				error.Run();
 			}
 		}

@@ -23,6 +23,7 @@ namespace UrnWrapper.UI
 
 			using (var confirm = new MessageDialog(parent, DialogFlags.Modal, MessageType.Question, ButtonsType.YesNo, "Delete \"" + target.Name + "\"?"))
 			{
+				DialogSizing.ApplyMessage(confirm);
 				ResponseType response = (ResponseType)confirm.Run();
 
 				if (response != ResponseType.Yes)
@@ -49,6 +50,7 @@ namespace UrnWrapper.UI
 		{
 			using (var error = new MessageDialog(parent, DialogFlags.Modal, MessageType.Error, ButtonsType.Ok, message))
 			{
+				DialogSizing.ApplyMessage(error);
 				error.Run();
 			}
 		}

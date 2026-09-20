@@ -26,6 +26,7 @@ namespace UrnWrapper.UI
 			{
 				dialog.AddButton("Cancel", ResponseType.Cancel);
 				dialog.AddButton("Save", ResponseType.Accept);
+				DialogSizing.Apply(dialog);
 
 				var nameEntry = new Entry();
 				nameEntry.Text = original.Name;
@@ -150,6 +151,7 @@ namespace UrnWrapper.UI
 		{
 			using (var error = new MessageDialog(parent, DialogFlags.Modal, MessageType.Error, ButtonsType.Ok, message))
 			{
+				DialogSizing.ApplyMessage(error);
 				error.Run();
 			}
 		}

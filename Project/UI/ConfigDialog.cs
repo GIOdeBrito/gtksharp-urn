@@ -17,6 +17,7 @@ namespace UrnWrapper.UI
 				dialog.AddButton("Cancel", ResponseType.Cancel);
 				dialog.AddButton("Reset secure defaults", ResponseType.Reject);
 				dialog.AddButton("Save", ResponseType.Accept);
+				DialogSizing.Apply(dialog);
 
 				var homeEntry = new Entry();
 				homeEntry.Text = current.DefaultHome;
@@ -128,6 +129,7 @@ namespace UrnWrapper.UI
 		{
 			using (var chooser = new FileChooserDialog("Select Default Home", parent, FileChooserAction.SelectFolder, "Cancel", ResponseType.Cancel, "Open", ResponseType.Accept))
 			{
+				DialogSizing.ApplyChooser(chooser);
 				SetInitialFolder(chooser, homeEntry.Text.Trim());
 
 				ResponseType response = (ResponseType)chooser.Run();
@@ -166,6 +168,7 @@ namespace UrnWrapper.UI
 		{
 			using (var error = new MessageDialog(parent, DialogFlags.Modal, MessageType.Error, ButtonsType.Ok, message))
 			{
+				DialogSizing.ApplyMessage(error);
 				error.Run();
 			}
 		}
