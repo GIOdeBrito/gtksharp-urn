@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using Gtk;
 using UrnWrapper.Models;
 using UrnWrapper.Persistence;
@@ -28,6 +30,12 @@ namespace UrnWrapper.UI
 		private const string FallbackProgramDir = "/usr/bin";
 		private const string ShellPath = "/bin/sh";
 		private const string SandboxBinary = "bwrap";
+		private const string AppImageExtension = ".AppImage";
+		private const string AppImageCacheDirName = ".cache";
+		private const string AppImageCacheSubDir = "appimage";
+		private const string AppImageSquashDir = "squashfs-root";
+		private const string AppImageAppRun = "AppRun";
+		private const string AppImageExtractFlag = "--appimage-extract";
 
 		internal static void Run(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, int itemIndex)
 		{
@@ -140,6 +148,27 @@ namespace UrnWrapper.UI
 			string display = Environment.GetEnvironmentVariable("DISPLAY") ?? string.Empty;
 			string waylandDisplay = Environment.GetEnvironmentVariable("WAYLAND_DISPLAY") ?? string.Empty;
 			SandboxOptions options = AppStorage.NormalizeOptions(target.Options);
+
+			if (IsAppImagePath(programPath) && options.AppImageExtractAndRun)
+			{
+				if (!TryPrepareExtractedAppRun(config.DefaultHome, programPath, out string extractedAppRun, out string extractedDir, out string extractError))
+				{
+					ShowError(parent, extractError);
+					return;
+				}
+
+				programPath = extractedAppRun;
+				programDir = ResolveProgramDir(programPath);
+
+				if (IsSubPathOf(programDir, config.DefaultHome))
+				{
+					// The extracted tree is already visible via the
+					// defaultHome bind. Re-binding the host path onto
+					// itself would be a no-op at best and a read-only
+					// shadow at worst, so bind an already-bound dir.
+					programDir = FallbackProgramDir;
+				}
+			}
 
 			string expandedCommand = ExpandCommand(config.DefaultCommand, config.DefaultHome, AppStorage.SandboxHome, programPath, programArgs, programDir, xdgRuntimeDir, display, waylandDisplay, options);
 
@@ -374,7 +403,7 @@ namespace UrnWrapper.UI
 				AppendAudioArgs(fragments, xdgRuntimeDir);
 			}
 
-			if (effective.AllowAppImage)
+			if (effective.AllowAppImage && !effective.AppImageExtractAndRun)
 			{
 				AppendAppImageArgs(fragments);
 			}
@@ -474,6 +503,268 @@ namespace UrnWrapper.UI
 			}
 
 			return directory;
+		}
+
+		private static bool IsAppImagePath(string? programPath)
+		{
+			if (string.IsNullOrWhiteSpace(programPath))
+			{
+				return false;
+			}
+
+			return programPath.Trim().EndsWith(AppImageExtension, StringComparison.OrdinalIgnoreCase);
+		}
+
+		private static bool IsSubPathOf(string? candidate, string? baseDir)
+		{
+			if (string.IsNullOrWhiteSpace(candidate))
+			{
+				return false;
+			}
+
+			if (string.IsNullOrWhiteSpace(baseDir))
+			{
+				return false;
+			}
+
+			string fullCandidate;
+			string fullBase;
+
+			try
+			{
+				fullCandidate = Path.GetFullPath(candidate.Trim()).TrimEnd(Path.DirectorySeparatorChar);
+				fullBase = Path.GetFullPath(baseDir.Trim()).TrimEnd(Path.DirectorySeparatorChar);
+			}
+			catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException || exception is ArgumentException || exception is NotSupportedException)
+			{
+				return false;
+			}
+
+			if (string.Equals(fullCandidate, fullBase, StringComparison.Ordinal))
+			{
+				return true;
+			}
+
+			return fullCandidate.StartsWith(fullBase + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+		}
+
+		private static bool TryPrepareExtractedAppRun(string defaultHome, string appImagePath, out string appRunHostPath, out string appRunDirHostPath, out string error)
+		{
+			appRunHostPath = string.Empty;
+			appRunDirHostPath = string.Empty;
+			error = string.Empty;
+
+			if (string.IsNullOrWhiteSpace(defaultHome))
+			{
+				error = "Set Default home in Config first.";
+				return false;
+			}
+
+			if (!File.Exists(appImagePath))
+			{
+				error = "AppImage file does not exist: " + appImagePath;
+				return false;
+			}
+
+			FileInfo info;
+
+			try
+			{
+				info = new FileInfo(appImagePath);
+			}
+			catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException || exception is ArgumentException || exception is NotSupportedException)
+			{
+				error = "Could not inspect AppImage: " + exception.Message;
+				return false;
+			}
+
+			string cacheDir = Path.Combine(defaultHome, AppImageCacheDirName, AppImageCacheSubDir);
+			string extractDir = Path.Combine(cacheDir, BuildExtractKey(appImagePath, info));
+			string squashDir = Path.Combine(extractDir, AppImageSquashDir);
+			string appRun = Path.Combine(squashDir, AppImageAppRun);
+
+			if (File.Exists(appRun))
+			{
+				appRunHostPath = appRun;
+				appRunDirHostPath = squashDir;
+				return true;
+			}
+
+			if (!TryExtractAppImage(defaultHome, appImagePath, extractDir, out error))
+			{
+				return false;
+			}
+
+			if (!File.Exists(appRun))
+			{
+				error = "Extraction did not produce AppRun. The file may not be a Type2 AppImage. Try FUSE mode instead.";
+				return false;
+			}
+
+			appRunHostPath = appRun;
+			appRunDirHostPath = squashDir;
+			return true;
+		}
+
+		private static string BuildExtractKey(string appImagePath, FileInfo info)
+		{
+			string fullPath;
+
+			try
+			{
+				fullPath = Path.GetFullPath(appImagePath.Trim());
+			}
+			catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException || exception is ArgumentException || exception is NotSupportedException)
+			{
+				fullPath = appImagePath.Trim();
+			}
+
+			long length = 0;
+			long ticks = 0;
+
+			try
+			{
+				length = info.Length;
+				ticks = info.LastWriteTimeUtc.Ticks;
+			}
+			catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException)
+			{
+				length = 0;
+				ticks = 0;
+			}
+
+			string fingerprint = fullPath + "|" + length.ToString() + "|" + ticks.ToString();
+			byte[] bytes = Encoding.UTF8.GetBytes(fingerprint);
+
+			using (SHA256 sha = SHA256.Create())
+			{
+				byte[] hash = sha.ComputeHash(bytes);
+				var builder = new StringBuilder(hash.Length * 2);
+
+				foreach (byte b in hash)
+				{
+					builder.Append(b.ToString("x2"));
+				}
+
+				return builder.ToString();
+			}
+		}
+
+		private static bool TryExtractAppImage(string defaultHome, string appImagePath, string extractDir, out string error)
+		{
+			error = string.Empty;
+			string stagingDir = extractDir + ".staging";
+
+			try
+			{
+				if (Directory.Exists(stagingDir))
+				{
+					Directory.Delete(stagingDir, true);
+				}
+
+				Directory.CreateDirectory(stagingDir);
+			}
+			catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException || exception is ArgumentException || exception is NotSupportedException)
+			{
+				error = "Could not prepare AppImage cache: " + exception.Message;
+				return false;
+			}
+
+			int exitCode = RunAppImageExtract(defaultHome, appImagePath, stagingDir, out string detail);
+
+			if (exitCode != 0)
+			{
+				TryDeleteDirectory(stagingDir);
+				error = "AppImage extraction failed (code " + exitCode + "). " + detail;
+				return false;
+			}
+
+			try
+			{
+				if (Directory.Exists(extractDir))
+				{
+					Directory.Delete(extractDir, true);
+				}
+
+				Directory.Move(stagingDir, extractDir);
+				return true;
+			}
+			catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException || exception is ArgumentException || exception is NotSupportedException)
+			{
+				TryDeleteDirectory(stagingDir);
+				error = "Could not finalize AppImage cache: " + exception.Message;
+				return false;
+			}
+		}
+
+		private static int RunAppImageExtract(string defaultHome, string appImagePath, string workingDir, out string detail)
+		{
+			detail = string.Empty;
+
+			var startInfo = new ProcessStartInfo(appImagePath);
+			startInfo.UseShellExecute = false;
+			startInfo.WorkingDirectory = workingDir;
+			startInfo.RedirectStandardOutput = true;
+			startInfo.RedirectStandardError = true;
+			startInfo.ArgumentList.Add(AppImageExtractFlag);
+
+			try
+			{
+				startInfo.Environment["HOME"] = defaultHome;
+			}
+			catch (Exception exception) when (exception is ArgumentException || exception is NotSupportedException || exception is InvalidOperationException)
+			{
+				detail = exception.Message;
+				return -1;
+			}
+
+			try
+			{
+				Process? process = Process.Start(startInfo);
+
+				if (process == null)
+				{
+					detail = "Could not start AppImage extractor.";
+					return -1;
+				}
+
+				using (process)
+				{
+					string output = process.StandardOutput.ReadToEnd();
+					string errors = process.StandardError.ReadToEnd();
+					process.WaitForExit();
+					detail = (errors + " " + output).Trim();
+
+					if (detail.Length > 500)
+					{
+						detail = detail.Substring(0, 500);
+					}
+
+					return process.ExitCode;
+				}
+			}
+			catch (Exception exception) when (exception is Win32Exception || exception is IOException || exception is UnauthorizedAccessException || exception is InvalidOperationException || exception is NotSupportedException)
+			{
+				detail = exception.Message;
+				return -1;
+			}
+		}
+
+		private static void TryDeleteDirectory(string path)
+		{
+			try
+			{
+				if (Directory.Exists(path))
+				{
+					Directory.Delete(path, true);
+				}
+			}
+			catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException || exception is ArgumentException || exception is NotSupportedException)
+			{
+				// Best-effort cleanup of a stale staging dir. A leftover
+				// is harmless because the next run recreates it.
+				Console.Error.WriteLine("Could not clean AppImage staging dir: " + exception.Message);
+			}
 		}
 
 		private static void StartSandbox(Window parent, string expandedCommand, string profileName, ListStore store, TreeModelFilter filter, List<SandboxProfile> items)

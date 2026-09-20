@@ -8,6 +8,7 @@ namespace UrnWrapper.Models
 		[property: JsonPropertyName("allowX11")] bool AllowX11 = true,
 		[property: JsonPropertyName("allowWayland")] bool AllowWayland = true,
 		[property: JsonPropertyName("allowAudio")] bool AllowAudio = false,
-		[property: JsonPropertyName("allowAppImage")] bool AllowAppImage = false
+		[property: JsonPropertyName("allowAppImage")] bool AllowAppImage = false,
+		[property: JsonPropertyName("appImageExtractAndRun")] bool AppImageExtractAndRun = false
 	);
 }

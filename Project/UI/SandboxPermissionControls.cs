@@ -12,6 +12,7 @@ namespace UrnWrapper.UI
 		internal CheckButton WaylandCheck { get; }
 		internal CheckButton AudioCheck { get; }
 		internal CheckButton AppImageCheck { get; }
+		internal CheckButton AppImageExtractCheck { get; }
 
 		private SandboxPermissionControls(SandboxOptions options)
 		{
@@ -21,6 +22,7 @@ namespace UrnWrapper.UI
 			WaylandCheck = BuildCheck("Wayland (socket + WAYLAND_DISPLAY)", "Expose only the Wayland socket, not the whole runtime dir.", options.AllowWayland);
 			AudioCheck = BuildCheck("Audio (Pulse/PipeWire)", "Expose audio sockets and set PULSE_SERVER.", options.AllowAudio);
 			AppImageCheck = BuildCheck("AppImage / FUSE (fusermount)", "Expose FUSE helpers for Type2 AppImages. Increases kernel surface, enable only for AppImages.", options.AllowAppImage);
+			AppImageExtractCheck = BuildCheck("AppImage extract-and-run (no FUSE)", "Extract squashfs-root to the isolated cache and run AppRun inside the sandbox. Suppresses FUSE. Enable only for AppImages.", options.AppImageExtractAndRun);
 		}
 
 		internal static SandboxPermissionControls FromOptions(SandboxOptions? options)
@@ -37,7 +39,8 @@ namespace UrnWrapper.UI
 				X11Check.Active,
 				WaylandCheck.Active,
 				AudioCheck.Active,
-				AppImageCheck.Active
+				AppImageCheck.Active,
+				AppImageExtractCheck.Active
 			);
 		}
 
@@ -50,6 +53,7 @@ namespace UrnWrapper.UI
 			list.PackStart(WaylandCheck, false, false, 0);
 			list.PackStart(AudioCheck, false, false, 0);
 			list.PackStart(AppImageCheck, false, false, 0);
+			list.PackStart(AppImageExtractCheck, false, false, 0);
 
 			var frame = new Frame("Sandbox permissions");
 			frame.Add(list);
