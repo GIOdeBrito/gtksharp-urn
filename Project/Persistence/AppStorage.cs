@@ -15,19 +15,21 @@ namespace UrnWrapper.Persistence
 
 		internal const string SandboxHome = "/home/sandbox";
 		internal const string OptionalArgsPlaceholder = "%optionalArgs%";
+		internal const string ProgramArgsPlaceholder = "%programArgs%";
+		internal const string FilesystemHideMarker = "--tmpfs /home";
 		private const string ProgramDirMarker = " --ro-bind-try %programDir%";
 
 		internal const string DefaultCommandTemplate = "bwrap --unshare-all --die-with-parent --new-session"
 			+ " --ro-bind /usr /usr --ro-bind /etc /etc --ro-bind /opt /opt"
 			+ " --symlink usr/lib /lib --symlink usr/lib64 /lib64 --symlink usr/bin /bin --symlink usr/sbin /sbin"
 			+ " --proc /proc --dev /dev --ro-bind-try /sys /sys --tmpfs /tmp --tmpfs /run"
-			+ " --dev-bind-try /dev/fuse /dev/fuse"
+			+ " --tmpfs /home --tmpfs /root --tmpfs /var --tmpfs /srv --tmpfs /mnt --tmpfs /media"
 			+ " --ro-bind-try /etc/fonts /etc/fonts --ro-bind-try /usr/share/fonts /usr/share/fonts --ro-bind-try /etc/ssl /etc/ssl"
 			+ "%optionalArgs%"
 			+ " --dir %sandboxHome% --bind %defaultHomeDir% %sandboxHome%"
 			+ " --setenv HOME %sandboxHome% --setenv XDG_CONFIG_HOME %sandboxConfig% --setenv XDG_CACHE_HOME %sandboxCache% --setenv XDG_DATA_HOME %sandboxData% --setenv XDG_RUNTIME_DIR /run"
 			+ " --chdir %sandboxHome%"
-			+ " --ro-bind-try %programDir% %programDir% -- %programPath%";
+			+ " --ro-bind-try %programDir% %programDir% -- %programPath%%programArgs%";
 
 		internal static readonly SandboxOptions DefaultOptions = new SandboxOptions(true, true, true, true, false, false);
 
@@ -137,6 +139,11 @@ namespace UrnWrapper.Persistence
 					return MigrateTemplateToOptionalArgs(filePath, config);
 				}
 
+				if (IsOutdatedTemplate(config.DefaultCommand))
+				{
+					return MigrateToSecureDefaults(filePath, config.DefaultHome);
+				}
+
 				return config;
 			}
 			catch (Exception exception) when (exception is JsonException || exception is IOException || exception is UnauthorizedAccessException)
@@ -219,10 +226,17 @@ namespace UrnWrapper.Persistence
 			// Configs saved before per-program toggles hardcode network, GPU,
 			// X11, Wayland and the coarse XDG bind. Strip those so the new
 			// toggles are the single source of truth, then insert the slot.
+			// Anything this old also lacks the filesystem-hiding mounts and
+			// multi-arg support, so fall through to secure defaults.
 			string stripped = StripLegacyOptionalFlags(config.DefaultCommand);
 			string? expanded = InsertOptionalPlaceholder(stripped);
 
 			if (expanded == null)
+			{
+				return MigrateToSecureDefaults(filePath, config.DefaultHome);
+			}
+
+			if (IsOutdatedTemplate(expanded))
 			{
 				return MigrateToSecureDefaults(filePath, config.DefaultHome);
 			}
@@ -271,6 +285,25 @@ namespace UrnWrapper.Persistence
 			}
 
 			if (TemplateExposesRealHome(template))
+			{
+				return true;
+			}
+
+			return false;
+		}
+
+		private static bool IsOutdatedTemplate(string template)
+		{
+			// Templates saved before the filesystem-hiding tmpfs mounts
+			// or before multi-arg support still leave /home, /root and
+			// /var visible, or drop program arguments. Upgrade them so
+			// old installs get the same containment as fresh ones.
+			if (!template.Contains(FilesystemHideMarker, StringComparison.Ordinal))
+			{
+				return true;
+			}
+
+			if (!template.Contains(ProgramArgsPlaceholder, StringComparison.Ordinal))
 			{
 				return true;
 			}

@@ -18,7 +18,9 @@ namespace UrnWrapper.UI
 		private const string SandboxDataPlaceholder = "%sandboxData%";
 		private const string ProgramPathPlaceholder = "%programPath%";
 		private const string ProgramDirPlaceholder = "%programDir%";
+		private const string ProgramArgsPlaceholder = "%programArgs%";
 		private const string OptionalArgsPlaceholder = "%optionalArgs%";
+		private const string FilesystemHideMarker = "--tmpfs /home";
 		private const string XdgRuntimeDirPlaceholder = "%xdgRuntimeDir%";
 		private const string DisplayPlaceholder = "%display%";
 		private const string WaylandDisplayPlaceholder = "%waylandDisplay%";
@@ -77,6 +79,24 @@ namespace UrnWrapper.UI
 				return;
 			}
 
+			if (!config.DefaultCommand.Contains(FilesystemHideMarker, StringComparison.Ordinal))
+			{
+				ShowError(parent, "Template lacks filesystem hiding. Reset it in Config.");
+				return;
+			}
+
+			if (!config.DefaultCommand.Contains(ProgramArgsPlaceholder, StringComparison.Ordinal))
+			{
+				ShowError(parent, "Template lacks program args support. Reset it in Config.");
+				return;
+			}
+
+			if (!config.DefaultCommand.Contains(OptionalArgsPlaceholder, StringComparison.Ordinal))
+			{
+				ShowError(parent, "Template lacks permissions support. Reset it in Config.");
+				return;
+			}
+
 			SandboxProfile target = items[itemIndex];
 
 			if (string.IsNullOrWhiteSpace(target.Command))
@@ -91,10 +111,26 @@ namespace UrnWrapper.UI
 				return;
 			}
 
-			string programCommand = target.Command.Trim();
-			string programDir = ResolveProgramDir(programCommand);
+			string[] argv = SplitCommand(target.Command);
 
-			if (AppStorage.IsRealHomePath(programDir))
+			if (argv.Length == 0)
+			{
+				ShowError(parent, "Command must not be empty.");
+				return;
+			}
+
+			string programPath = argv[0];
+			string[] programArgs = argv.Length > 1 ? argv[1..] : Array.Empty<string>();
+
+			if (string.IsNullOrWhiteSpace(programPath))
+			{
+				ShowError(parent, "Command must not be empty.");
+				return;
+			}
+
+			string programDir = ResolveProgramDir(programPath);
+
+			if (Path.IsPathRooted(programPath) && AppStorage.IsRealHomePath(programDir))
 			{
 				ShowError(parent, "Program inside the real home would expose it. Move it outside.");
 				return;
@@ -105,7 +141,7 @@ namespace UrnWrapper.UI
 			string waylandDisplay = Environment.GetEnvironmentVariable("WAYLAND_DISPLAY") ?? string.Empty;
 			SandboxOptions options = AppStorage.NormalizeOptions(target.Options);
 
-			string expandedCommand = ExpandCommand(config.DefaultCommand, config.DefaultHome, AppStorage.SandboxHome, programCommand, programDir, xdgRuntimeDir, display, waylandDisplay, options);
+			string expandedCommand = ExpandCommand(config.DefaultCommand, config.DefaultHome, AppStorage.SandboxHome, programPath, programArgs, programDir, xdgRuntimeDir, display, waylandDisplay, options);
 
 			if (string.IsNullOrWhiteSpace(expandedCommand))
 			{
@@ -129,7 +165,7 @@ namespace UrnWrapper.UI
 			}
 		}
 
-		internal static string ExpandCommand(string template, string defaultHome, string sandboxHome, string programPath, string programDir, string xdgRuntimeDir, string display, string waylandDisplay, SandboxOptions? options)
+		internal static string ExpandCommand(string template, string defaultHome, string sandboxHome, string programPath, IReadOnlyList<string> programArgs, string programDir, string xdgRuntimeDir, string display, string waylandDisplay, SandboxOptions? options)
 		{
 			if (template == null)
 			{
@@ -140,6 +176,7 @@ namespace UrnWrapper.UI
 			string sandboxCache = sandboxHome.TrimEnd('/') + "/.cache";
 			string sandboxData = sandboxHome.TrimEnd('/') + "/.local/share";
 			string optionalArgs = BuildOptionalArgs(options, xdgRuntimeDir, display, waylandDisplay);
+			string quotedProgramArgs = BuildProgramArgs(programArgs);
 
 			return template
 				.Replace(OptionalArgsPlaceholder, optionalArgs, StringComparison.Ordinal)
@@ -152,7 +189,159 @@ namespace UrnWrapper.UI
 				.Replace(XdgRuntimeDirPlaceholder, QuoteForShell(xdgRuntimeDir), StringComparison.Ordinal)
 				.Replace(DisplayPlaceholder, QuoteForShell(display), StringComparison.Ordinal)
 				.Replace(WaylandDisplayPlaceholder, QuoteForShell(waylandDisplay), StringComparison.Ordinal)
-				.Replace(ProgramPathPlaceholder, QuoteForShell(programPath), StringComparison.Ordinal);
+				.Replace(ProgramPathPlaceholder, QuoteForShell(programPath), StringComparison.Ordinal)
+				.Replace(ProgramArgsPlaceholder, quotedProgramArgs, StringComparison.Ordinal);
+		}
+
+		internal static string BuildProgramArgs(IReadOnlyList<string>? args)
+		{
+			if (args == null)
+			{
+				return string.Empty;
+			}
+
+			if (args.Count == 0)
+			{
+				return string.Empty;
+			}
+
+			var quoted = new List<string>(args.Count);
+
+			foreach (string arg in args)
+			{
+				quoted.Add(QuoteForShell(arg));
+			}
+
+			return " " + string.Join(" ", quoted);
+		}
+
+		internal static string[] SplitCommand(string? command)
+		{
+			// Shell-word split so `prog --flag "quoted arg"` keeps one
+			// argv entry per word. Each entry is quoted separately later,
+			// so metacharacters stay inert under `sh -c`.
+			if (string.IsNullOrWhiteSpace(command))
+			{
+				return Array.Empty<string>();
+			}
+
+			var argv = new List<string>();
+			var current = new System.Text.StringBuilder();
+			bool inToken = false;
+			int i = 0;
+
+			while (i < command.Length)
+			{
+				char c = command[i];
+
+				if (!inToken)
+				{
+					if (char.IsWhiteSpace(c))
+					{
+						i++;
+						continue;
+					}
+
+					inToken = true;
+					continue;
+				}
+
+				if (char.IsWhiteSpace(c))
+				{
+					argv.Add(current.ToString());
+					current.Clear();
+					inToken = false;
+					i++;
+					continue;
+				}
+
+				if (c == '\'')
+				{
+					i = AppendSingleQuoted(command, i, current);
+					continue;
+				}
+
+				if (c == '"')
+				{
+					i = AppendDoubleQuoted(command, i, current);
+					continue;
+				}
+
+				if (c == '\\')
+				{
+					i = AppendEscaped(command, i, current);
+					continue;
+				}
+
+				current.Append(c);
+				i++;
+			}
+
+			if (inToken)
+			{
+				argv.Add(current.ToString());
+			}
+
+			return argv.ToArray();
+		}
+
+		private static int AppendSingleQuoted(string command, int quoteIndex, System.Text.StringBuilder current)
+		{
+			int i = quoteIndex + 1;
+
+			while (i < command.Length)
+			{
+				if (command[i] == '\'')
+				{
+					return i + 1;
+				}
+
+				current.Append(command[i]);
+				i++;
+			}
+
+			return i;
+		}
+
+		private static int AppendDoubleQuoted(string command, int quoteIndex, System.Text.StringBuilder current)
+		{
+			int i = quoteIndex + 1;
+
+			while (i < command.Length)
+			{
+				if (command[i] == '"')
+				{
+					return i + 1;
+				}
+
+				if (command[i] == '\\' && i + 1 < command.Length)
+				{
+					char next = command[i + 1];
+
+					if (next == '"' || next == '\\' || next == '$' || next == '`')
+					{
+						current.Append(next);
+						i += 2;
+						continue;
+					}
+				}
+
+				current.Append(command[i]);
+				i++;
+			}
+
+			return i;
+		}
+
+		private static int AppendEscaped(string command, int backslashIndex, System.Text.StringBuilder current)
+		{
+			if (backslashIndex + 1 >= command.Length)
+			{
+				return command.Length;
+			}
+
+			current.Append(command[backslashIndex + 1]);
+			return backslashIndex + 2;
 		}
 
 		internal static string BuildOptionalArgs(SandboxOptions? options, string xdgRuntimeDir, string display, string waylandDisplay)
@@ -230,9 +419,9 @@ namespace UrnWrapper.UI
 		private static void AppendAppImageArgs(List<string> fragments)
 		{
 			// Type2 AppImages mount squashfs via fusermount on PATH plus /dev/fuse.
-			// The device alone is already in the core template and inert without
-			// a helper; the helper binaries below make the toggle effective.
-			// bind-try keeps distro-specific paths a safe no-op.
+			// Both stay disabled unless this toggle is on; the device alone
+			// is inert without a helper, and bind-try keeps distro-specific
+			// helper paths a safe no-op.
 			fragments.Add("--dev-bind-try /dev/fuse /dev/fuse");
 			fragments.Add("--ro-bind-try /usr/bin/fusermount /usr/bin/fusermount");
 			fragments.Add("--ro-bind-try /usr/bin/fusermount3 /usr/bin/fusermount3");
@@ -263,14 +452,21 @@ namespace UrnWrapper.UI
 			return true;
 		}
 
-		private static string ResolveProgramDir(string programCommand)
+		private static string ResolveProgramDir(string programPath)
 		{
-			if (string.IsNullOrWhiteSpace(programCommand))
+			if (string.IsNullOrWhiteSpace(programPath))
 			{
 				return FallbackProgramDir;
 			}
 
-			string? directory = Path.GetDirectoryName(programCommand);
+			string trimmed = programPath.Trim();
+
+			if (string.IsNullOrWhiteSpace(trimmed))
+			{
+				return FallbackProgramDir;
+			}
+
+			string? directory = Path.GetDirectoryName(trimmed);
 
 			if (string.IsNullOrWhiteSpace(directory))
 			{
