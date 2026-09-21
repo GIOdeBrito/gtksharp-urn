@@ -52,6 +52,7 @@ namespace UrnWrapper.UI
 
 				if (string.IsNullOrWhiteSpace(name))
 				{
+					ShowError(parent, "Name must not be empty.");
 					return;
 				}
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Gtk;
 using UrnWrapper.Models;
 using UrnWrapper.Persistence;
@@ -8,14 +9,15 @@ namespace UrnWrapper.UI
 {
 	internal static class MainWindow
 	{
-		private const string WindowTitle = "UrnWrapper";
+		private const string AppName = "UrnWrapper";
+		private const string FallbackVersion = "1.0.0";
 		private const string SearchPlaceholder = "Search...";
 		private const int MaxDrainIterations = 1000;
 		private static bool isDialogOpen;
 
 		internal static Window Build()
 		{
-			var window = new Window(WindowTitle);
+			var window = new Window(BuildWindowTitle());
 			window.SetSizeRequest(600, 400);
 			window.SetPosition(WindowPosition.Center);
 
@@ -41,7 +43,7 @@ namespace UrnWrapper.UI
 			var addButton = new Button("Add");
 			addButton.Clicked += (sender, args) =>
 			{
-				AddItemDialog.Show(window, store, filter, items);
+				AddStoreRow(window, store, filter, items);
 			};
 
 			TreeView table = BuildProfileTable(window, store, filter, items);
@@ -80,6 +82,28 @@ namespace UrnWrapper.UI
 					break;
 				}
 			}
+		}
+
+		private static string BuildWindowTitle()
+		{
+			return AppName + " " + ResolveAppVersion();
+		}
+
+		private static string ResolveAppVersion()
+		{
+			AssemblyInformationalVersionAttribute? versionAttribute = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>();
+
+			if (versionAttribute == null)
+			{
+				return FallbackVersion;
+			}
+
+			if (string.IsNullOrWhiteSpace(versionAttribute.InformationalVersion))
+			{
+				return FallbackVersion;
+			}
+
+			return versionAttribute.InformationalVersion.Trim();
 		}
 
 		private static TreeView BuildProfileTable(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items)
@@ -190,6 +214,25 @@ namespace UrnWrapper.UI
 			}
 
 			RunProfile.Run(parent, store, filter, items, itemIndex);
+		}
+
+		private static void AddStoreRow(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items)
+		{
+			if (isDialogOpen)
+			{
+				return;
+			}
+
+			isDialogOpen = true;
+
+			try
+			{
+				AddItemDialog.Show(parent, store, filter, items);
+			}
+			finally
+			{
+				isDialogOpen = false;
+			}
 		}
 
 		private static void EditStoreRow(Window parent, ListStore store, TreeModelFilter filter, List<SandboxProfile> items, TreeIter storeIter)
